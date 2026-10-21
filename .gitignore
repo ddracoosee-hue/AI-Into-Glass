@@ -6,3 +6,6 @@ dist/
 .env
 .env.*
 gate.log
+demo-take/
+# simulator screenshot-button exports land in its working directory
+glasses_*.png

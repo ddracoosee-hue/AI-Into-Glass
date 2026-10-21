@@ -227,7 +227,15 @@ class EndToEnd(LiveRelay):
         self.assertIsNone(self.run_hook(bash("git push --force origin main")))
         self.assertEqual(self.relay.requests, {})
         last = json.loads((self.home / "gate.log").read_text(encoding="utf-8").splitlines()[-1])
-        self.assertEqual((last["event"], last["reason"]), ("bypassed", "git push --force"))
+        self.assertEqual((last["event"], last["reason"], last["summary"]), ("bypassed", "git push --force", "git push --force origin main"))
+
+    def test_bypassed_file_write_is_logged_by_path_without_content(self):
+        event = {"hook_event_name": "PermissionRequest", "tool_name": "Write", "cwd": CWD,
+                 "tool_input": {"file_path": os.path.join(CWD, ".env"), "content": "API_KEY=sk-live-secret"}}
+        self.assertIsNone(self.run_hook(event))
+        line = (self.home / "gate.log").read_text(encoding="utf-8").splitlines()[-1]
+        self.assertEqual(json.loads(line)["summary"], "Write .env")
+        self.assertNotIn("sk-live-secret", line)
 
     def test_garbage_input_is_silent(self):
         for stdin in (b"", b"not json", b"[]", b'{"hook_event_name": "PreToolUse"}',

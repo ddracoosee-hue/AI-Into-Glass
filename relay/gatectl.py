@@ -6,6 +6,7 @@
     python relay/gatectl.py revoke dev_1a2b3c    # unpair one
     python relay/gatectl.py arm | disarm         # PC-side switch; the hotkey runs `disarm --source hotkey`
     python relay/gatectl.py status               # armed state, relay URL, last log lines
+    python relay/gatectl.py log -n 3             # recent outcomes, one line each
 """
 from __future__ import annotations
 
@@ -35,6 +36,26 @@ def pair(home, args) -> None:
     print(f"Phone (dev sideload; scan with the Even app):\n  npx evenhub qr --url \"{link}\"")
 
 
+OUTCOMES = {"approved": "APPROVED", "denied": "DENIED", "bypassed": "TERMINAL", "timeout": "TIMEOUT",
+            "cancelled": "CANCELLED"}
+
+
+def show_log(home, count: int) -> None:
+    """One line per outcome: when, what happened, what it was, who or why."""
+    log = home / "gate.log"
+    events = []
+    for raw in log.read_text(encoding="utf-8").splitlines() if log.exists() else []:
+        try:
+            event = json.loads(raw)
+        except ValueError:
+            continue
+        if event.get("event") in OUTCOMES:
+            events.append(event)
+    for e in events[-count:] if count > 0 else []:
+        who = e.get("decided_by") or e.get("reason") or ""
+        print(f"{e['ts'][11:19]}  {OUTCOMES[e['event']]:<9}  {e.get('summary') or e.get('tool') or '':<34}  {who}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Approval Gate admin")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -49,7 +70,10 @@ def main() -> None:
         p = sub.add_parser(cmd, help=f"{cmd} the gate from the PC")
         p.add_argument("--source", choices=("cli", "hotkey"), default="cli", help="recorded in gate.log")
     sub.add_parser("status", help="armed state, relay and the last log lines")
+    p = sub.add_parser("log", help="recent outcomes (approved, denied, terminal, timeout, cancelled)")
+    p.add_argument("-n", type=int, default=10)
     args = parser.parse_args()
+    sys.stdout.reconfigure(encoding="utf-8")  # piped output (Claude Code's ! mode, Git Bash) is read as UTF-8
 
     home = R.state_dir()
     home.mkdir(parents=True, exist_ok=True)
@@ -68,6 +92,8 @@ def main() -> None:
     elif args.cmd in ("arm", "disarm"):
         R.set_armed(home, args.cmd == "arm", args.source)
         print("Gate ARMED" if args.cmd == "arm" else "Gate disarmed")
+    elif args.cmd == "log":
+        show_log(home, args.n)
     elif args.cmd == "status":
         relay_file = home / "relay.json"
         print(f"armed    {(home / 'armed').exists()}")

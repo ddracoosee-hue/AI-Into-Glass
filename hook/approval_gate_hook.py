@@ -196,6 +196,20 @@ def build_request(event: dict) -> tuple[dict | None, str]:
     return {"session": session, "tool": tool, **described}, ""
 
 
+def log_summary(event: dict) -> str:
+    """Redacted one-liner for the local log, for requests that never reach the relay."""
+    tool, tool_input, cwd = event.get("tool_name"), event.get("tool_input"), event.get("cwd") or os.getcwd()
+    text = str(tool)
+    if isinstance(tool_input, dict) and isinstance(cwd, str):
+        path = tool_input.get("file_path") or tool_input.get("notebook_path")
+        if isinstance(tool_input.get("command"), str):
+            text = tool_input["command"]
+        elif isinstance(path, str):
+            text = f"{tool} {display_path(os.path.normpath(os.path.join(cwd, path)), cwd)}"
+    text = " ".join(redact(text).split())
+    return clip("".join(c if c.isprintable() else "?" for c in text), SUMMARY_MAX)
+
+
 def append_log(home: Path, **fields) -> None:
     from datetime import datetime
     line = json.dumps({"ts": datetime.now().astimezone().isoformat(timespec="seconds"), **fields}, ensure_ascii=False)
@@ -226,7 +240,7 @@ def decide(event: dict, home: Path) -> dict | None:
         return None
     request, reason = build_request(event)
     if request is None:
-        append_log(home, event="bypassed", tool=event.get("tool_name"), reason=reason)
+        append_log(home, event="bypassed", tool=event.get("tool_name"), summary=log_summary(event), reason=reason)
         return None
     try:
         final = ask_relay(home, request)
