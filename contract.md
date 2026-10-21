@@ -49,6 +49,20 @@ Claude Code is interrupted or the session ends. The request leaves the glasses a
   The hook replaces these with `[secret]`.
 - Absolute paths under the home directory. These become `~/…`, or a path relative to `cwd`.
 
+## Endpoints
+
+The relay listens on `127.0.0.1:8797`. The phone reaches it through `tailscale serve`. Every response
+carries CORS headers; credentials are bearer tokens, never cookies.
+
+| Endpoint | Caller and credential | Body | Answer |
+|---|---|---|---|
+| `POST /requests` | hook, `hook.key` | `session`, `tool`, `summary`, `detail`, `risk` | `201 {id, expires_at}`. `409` if disarmed or no device polling, `400` if malformed, `429` past 20 pending |
+| `GET /requests/{id}/wait` | hook, `hook.key` | — | Long-polls until the request leaves `pending` (at most its expiry), then the full request |
+| `GET /pending` | plugin, device token | — | `200` oldest live request plus `nonce` and `expires_in`, or `204` |
+| `POST /requests/{id}/decide` | plugin, device token | `{decision, nonce}` | `200` with the request; `409` if decided, expired, cancelled or the nonce is wrong; `404` if unknown |
+| `POST /arm`, `POST /disarm` | plugin, device token | `{source: "glasses" \| "phone", reason?}` | `200 {armed}`. `400` without a valid `source` |
+| `GET /health` | anyone | — | `{ok, version, armed, auth}`, where `auth` is `hook`, `device` or `null` for the credential presented |
+
 ## On the wire (not stored)
 
 `GET /pending` adds two fields to the request it returns:
@@ -61,6 +75,36 @@ Claude Code is interrupted or the session ends. The request leaves the glasses a
 Every `/pending` response, `200` or `204`, carries `X-Gate-Armed: 1|0`, `X-Gate-Waiting: <n>`
 and `X-Gate-Session: <last session name>`.
 
+## Armed state
+
+The gate is armed while `%APPDATA%\approval-gate\armed` exists. The hook only checks that file;
+the relay and `gatectl.py` create and remove it. Every change is a `gate.log` line with its `source`:
+
+| `source` | Who |
+|---|---|
+| `glasses` | The plugin: tap to arm, double-tap to disarm, or disarm on exit (`reason: "plugin exit"`) |
+| `phone` | The Disarm button on the plugin's phone page |
+| `hotkey`, `cli` | `gatectl.py arm` or `disarm` on the PC, with `--source hotkey` or `--source cli` |
+| `relay` | The relay itself: on stop, and after 60 s with no device polling |
+
+`by` carries the device id when a device made the change.
+
+## Hook output to Claude Code
+
+The hook answers Claude Code's `PermissionRequest` event with one of exactly two JSON objects, and only
+when the relay returned a decision for the hook's own request `id`:
+
+```json
+{"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}}
+```
+
+```json
+{"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "deny",
+  "message": "The user denied this from Approval Gate on their glasses (dev_…). Do not retry it; continue without it or ask the user."}}}
+```
+
+In every other case it prints nothing and exits 0, and Claude Code shows its own prompt.
+
 ## Decision rules
 
 1. Only `approved` with `decision: "approve"` and a matching `id` makes the hook allow.
@@ -68,4 +112,6 @@ and `X-Gate-Session: <last session name>`.
 3. Everything else gives the terminal prompt: `timeout`, `cancelled`, unknown `id`, malformed body,
    relay down or restarted, gate disarmed. These never become `allow`.
 4. The relay accepts a request only if a paired device polled `GET /pending` in the last 10 s. If polling
-   stops, its pending requests are `cancelled`. Nobody watching means the terminal prompt, not a 90 s stall.
+   stops, its pending requests are `cancelled`, and a decision that arrives afterwards gets `409`.
+   Nobody watching means the terminal prompt, not a 90 s stall.
+5. After 60 s with no device polling, the relay disarms the gate (`source: relay`).

@@ -12,7 +12,12 @@ Claude Code ──PermissionRequest──▶ hook ──POST /requests──▶ 
             ◀──allow / deny / nothing── hook ◀──GET …/wait──  relay ◀──POST …/decide── plugin ◀── tap / double-tap
 ```
 
-The hook, the relay and the plugin share no code, only [contract.md](contract.md).
+The hook, the relay and the plugin share no code, only [contract.md](contract.md). Where the code
+differs from the original build plan, and why, is in [docs/plan-deltas.md](docs/plan-deltas.md).
+
+The hook answers Claude Code with `{"hookSpecificOutput": {"hookEventName": "PermissionRequest",
+"decision": {"behavior": "allow"}}}` (or `"deny"` plus a `message`), and only for an explicit answer
+from the glasses. Otherwise it prints nothing.
 
 | Piece | Where | What it is |
 |---|---|---|
@@ -20,6 +25,17 @@ The hook, the relay and the plugin share no code, only [contract.md](contract.md
 | `relay/relay.py` | PC | The only thing the phone talks to. Stdlib `http.server`, in-memory queue, JSONL log. |
 | `relay/gatectl.py` | PC | Pair and revoke devices, arm and disarm from the PC, status. |
 | `plugin/` | phone + glasses | Even Hub plugin (Vite + TypeScript + `@evenrealities/even_hub_sdk`). |
+
+## Ports
+
+| Port | What | Why this one |
+|---|---|---|
+| 8797 | Relay, on `127.0.0.1` only | 8787, the usual pick, is the Orion MCP host on the development PC |
+| 5180 | Plugin dev server (Vite, `strictPort`) | 5173, Vite's default, was already in use |
+| 9898 | Simulator automation API | The simulator README's own example |
+
+Change the relay port with `relay.py --port`. The hook finds the relay through
+`%APPDATA%\approval-gate\relay.json`, so nothing else needs editing.
 
 ## Run it in the simulator
 
@@ -54,7 +70,7 @@ To try the hook in one project first, use
 
 | Screen | Tap | Double-tap | Swipe down / up |
 |---|---|---|---|
-| Gate off | Arm | Exit plugin | — |
+| Gate off | Arm | Exit plugin (disarming first) | — |
 | Armed, idle | — | Disarm | — |
 | Prompt | Approve | Deny | Full command / summary |
 | Approved / Denied | — | — | — |
@@ -105,7 +121,9 @@ This is a remote control for commands on your PC. These rules ship in v1:
 - **Short expiry.** 90 s, or 45 s for high risk. If no device has polled for 10 s, the relay refuses
   new requests and cancels pending ones, so a sleeping phone costs nothing.
 - **Arming is explicit.** Arm from the glasses or with `gatectl.py arm`. Disarm with a double-tap,
-  the phone button, or `gatectl.py disarm` (bind it to a hotkey). Stopping the relay disarms.
+  the phone button, or `gatectl.py disarm --source hotkey` bound to a hotkey. The relay disarms when
+  it stops, when the plugin exits, and after 60 s with no device polling. `gate.log` records the
+  source of every switch: `glasses`, `phone`, `hotkey`, `cli` or `relay`.
 - **Nothing secret leaves the PC.** No file contents (Write and Edit send a path and a line count),
   home paths become `~`, and secret-shaped strings become `[secret]`.
 - **Everything is logged.** Every request, decision, arm and disarm goes to
@@ -123,7 +141,7 @@ What this does **not** protect against:
 ## Tests
 
 ```powershell
-python -m unittest discover -s relay     # 18 relay tests
-python -m unittest discover -s hook      # 22 hook tests, incl. the real hook run with python -I against a live relay
-cd plugin; npx tsc --noEmit; npx vite build
+python -m unittest discover -s relay     # relay: round trip, nonce, expiry, presence, auth, sources
+python -m unittest discover -s hook      # hook rules, plus the real hook run with python -I against a live relay
+cd plugin; npm test; npx tsc --noEmit    # gestures (tap then double-tap denies), types
 ```
