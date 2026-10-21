@@ -226,6 +226,16 @@ class UnwatchedDisarm(RelayTest):
         last = self.log_events()[-1]
         self.assertEqual((last["event"], last["source"], last["reason"]), ("disarm", "relay", "no device polled for 1 s"))
 
+    def test_a_fresh_arm_gets_the_full_window_before_the_backstop(self):
+        time.sleep(1.2)
+        R.set_armed(self.home, False, "cli")
+        R.set_armed(self.home, True, "cli")  # armed on the PC before the plugin is open
+        self.relay.sweep()
+        self.assertTrue((self.home / "armed").exists())
+        time.sleep(1.2)
+        self.relay.sweep()
+        self.assertFalse((self.home / "armed").exists())
+
     def test_a_polling_device_keeps_it_armed(self):
         for _ in range(6):
             time.sleep(0.25)

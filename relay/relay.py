@@ -217,6 +217,13 @@ class Relay:
             self._finish(rid, "approved" if decision == "approve" else "denied", decision, device)
             return 200, req
 
+    def armed_for(self) -> float:
+        """Seconds since the gate was armed, so a fresh arm gets the full window to open the plugin."""
+        try:
+            return time.time() - (self.home / "armed").stat().st_mtime
+        except OSError:
+            return 0.0
+
     def start_sweeper(self, interval: float = 1.0) -> None:
         def run() -> None:
             while not self.stopping.wait(interval):
@@ -231,7 +238,7 @@ class Relay:
         armed-file check instead of asking the relay on every prompt."""
         with self.cond:
             now = time.monotonic()
-            if self.armed and now - max(self.last_poll, self.started) > self.unwatched_disarm:
+            if self.armed and min(now - max(self.last_poll, self.started), self.armed_for()) > self.unwatched_disarm:
                 set_armed(self.home, False, "relay", reason=f"no device polled for {self.unwatched_disarm:g} s")
             armed, watched = self.armed, self.watched
             for rid, req in list(self.requests.items()):

@@ -73,7 +73,8 @@ def main() -> None:
     p = sub.add_parser("log", help="recent outcomes (approved, denied, terminal, timeout, cancelled)")
     p.add_argument("-n", type=int, default=10)
     args = parser.parse_args()
-    sys.stdout.reconfigure(encoding="utf-8")  # piped output (Claude Code's ! mode, Git Bash) is read as UTF-8
+    if sys.stdout:  # None under pythonw, which the disarm hotkey uses
+        sys.stdout.reconfigure(encoding="utf-8")  # piped output (Claude Code's ! mode, Git Bash) is read as UTF-8
 
     home = R.state_dir()
     home.mkdir(parents=True, exist_ok=True)
