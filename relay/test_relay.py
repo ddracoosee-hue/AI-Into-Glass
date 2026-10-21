@@ -23,16 +23,18 @@ def request_body(**over):
 
 class RelayTest(unittest.TestCase):
     expiry = R.EXPIRY
+    presence = R.PRESENCE
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name)
         R.save_devices(self.home, {"dev_abc123": {"label": "test", "sha256": R.sha256(DEVICE_TOKEN), "created_at": R.now_iso()}})
-        self.httpd, self.relay = R.make_server(self.home, port=0, expiry=self.expiry)
+        self.httpd, self.relay = R.make_server(self.home, port=0, expiry=self.expiry, presence=self.presence)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         self.base = f"http://127.0.0.1:{self.httpd.server_port}"
         self.hook_key = self.relay.hook_key
         R.set_armed(self.home, True, by="test")
+        self.call("GET", "/pending", DEVICE_TOKEN)  # a device is watching
 
     def tearDown(self):
         self.httpd.shutdown()
@@ -175,6 +177,25 @@ class Arming(RelayTest):
             time.sleep(0.1)
         self.assertEqual(self.relay.requests[rid]["status"], "cancelled")
         self.assertEqual(self.call("GET", "/pending", DEVICE_TOKEN)[0], 204)
+
+
+class Presence(RelayTest):
+    presence = 1
+
+    def test_no_device_polling_means_terminal(self):
+        time.sleep(1.2)
+        status, body, _ = self.call("POST", "/requests", self.hook_key, request_body())
+        self.assertEqual((status, body["error"]), (409, "no device listening"))
+        self.call("GET", "/pending", DEVICE_TOKEN)
+        self.create()
+
+    def test_device_going_quiet_cancels_waiting_hooks(self):
+        rid = self.create()
+        t, result = self.wait_async(rid)
+        time.sleep(1.2)
+        self.relay.sweep()  # the serve loop runs this every second
+        t.join(5)
+        self.assertEqual(result["r"][1]["status"], "cancelled")
 
 
 class Auth(RelayTest):

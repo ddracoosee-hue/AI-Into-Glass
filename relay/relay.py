@@ -34,6 +34,7 @@ LIMITS = {"tool": 40, "summary": 60, "detail": 200, "agent": 40, "name": 40, "cw
 MAX_BODY = 16 * 1024
 MAX_PENDING = 20
 KEEP_FINISHED = 600  # seconds a decided request stays answerable to a late /wait
+PRESENCE = 10  # seconds since a device last polled /pending before the gate stops accepting requests
 WAIT_RE = re.compile(r"/requests/(req_[0-9A-Z]{26})/wait")
 DECIDE_RE = re.compile(r"/requests/(req_[0-9A-Z]{26})/decide")
 CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -96,8 +97,8 @@ def save_devices(home: Path, devices: dict) -> None:
 
 
 class Relay:
-    def __init__(self, home: Path, expiry: dict[str, int] = EXPIRY):
-        self.home, self.expiry = home, expiry
+    def __init__(self, home: Path, expiry: dict[str, int] = EXPIRY, presence: float = PRESENCE):
+        self.home, self.expiry, self.presence = home, expiry, presence
         home.mkdir(parents=True, exist_ok=True)
         key_file = home / "hook.key"
         if not key_file.exists():
@@ -107,10 +108,16 @@ class Relay:
         self.requests: dict[str, dict] = {}  # id -> contract shape, insertion = age order
         self.private: dict[str, dict] = {}   # id -> nonce, deadline, finished (never sent to the hook)
         self.last_session = ""
+        self.last_poll = float("-inf")  # monotonic time a device last polled /pending
 
     @property
     def armed(self) -> bool:
         return (self.home / "armed").exists()
+
+    @property
+    def watched(self) -> bool:
+        """Is a device polling right now? Nobody watching means the terminal prompt, not a 90 s stall."""
+        return time.monotonic() - self.last_poll <= self.presence
 
     def device_for(self, token: str) -> str | None:
         digest = sha256(token)
@@ -139,6 +146,8 @@ class Relay:
         if fields["risk"] not in self.expiry:
             return "risk must be low, medium or high"
         with self.cond:
+            if not self.watched:
+                return "no device listening"
             if sum(r["status"] == "pending" for r in self.requests.values()) >= MAX_PENDING:
                 return "too many pending requests"
             ttl = self.expiry[fields["risk"]]
@@ -178,7 +187,7 @@ class Relay:
     def pending(self) -> tuple[dict | None, int]:
         """Oldest live request plus its nonce, and how many are live."""
         with self.cond:
-            now = time.monotonic()
+            now = self.last_poll = time.monotonic()
             live = [r for r in self.requests.values()
                     if r["status"] == "pending" and self.private[r["id"]]["deadline"] > now]
             if not live or not self.armed:
@@ -203,12 +212,12 @@ class Relay:
             return 200, req
 
     def sweep(self) -> None:
-        """Expire stale requests, cancel everything on disarm, forget old ones."""
+        """Expire stale requests, cancel everything on disarm or when no device is polling, forget old ones."""
         with self.cond:
-            now, armed = time.monotonic(), self.armed
+            now, armed, watched = time.monotonic(), self.armed, self.watched
             for rid, req in list(self.requests.items()):
                 p = self.private[rid]
-                if req["status"] == "pending" and not armed:
+                if req["status"] == "pending" and not (armed and watched):
                     self._finish(rid, "cancelled")
                 elif req["status"] == "pending" and now >= p["deadline"]:
                     self._finish(rid, "timeout")
@@ -300,7 +309,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(409, {"error": "disarmed"})
             req = self.relay.create(body)
             if isinstance(req, str):
-                return self.reply(429 if req.startswith("too many") else 400, {"error": req})
+                code = 429 if req.startswith("too many") else 409 if req.startswith("no device") else 400
+                return self.reply(code, {"error": req})
             return self.reply(201, {"id": req["id"], "expires_at": req["expires_at"]})
         device = self.device()
         if m := DECIDE_RE.fullmatch(path):
@@ -330,8 +340,8 @@ class Server(ThreadingHTTPServer):
 
 
 def make_server(home: Path, host: str = "127.0.0.1", port: int = 8797, cors_origin: str = "*",
-                expiry: dict[str, int] = EXPIRY) -> tuple[Server, Relay]:
-    relay = Relay(home, expiry)
+                expiry: dict[str, int] = EXPIRY, presence: float = PRESENCE) -> tuple[Server, Relay]:
+    relay = Relay(home, expiry, presence)
     handler = type("BoundHandler", (Handler,), {"relay": relay, "cors_origin": cors_origin})
     return Server((host, port), handler), relay
 

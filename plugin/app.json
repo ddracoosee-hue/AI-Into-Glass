@@ -1,0 +1,17 @@
+{
+  "package_id": "com.approvalgate.glasses",
+  "edition": "202601",
+  "name": "Approval Gate",
+  "version": "0.1.0",
+  "min_app_version": "2.2.10",
+  "min_sdk_version": "0.0.16",
+  "entrypoint": "index.html",
+  "permissions": [
+    {
+      "name": "network",
+      "desc": "Reaches the Approval Gate relay on your own PC to show Claude Code permission prompts and send your answer.",
+      "whitelist": ["http://127.0.0.1:8797"]
+    }
+  ],
+  "supported_languages": ["en"]
+}

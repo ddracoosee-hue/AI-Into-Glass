@@ -67,3 +67,5 @@ and `X-Gate-Session: <last session name>`.
 2. `denied` makes the hook deny and tell Claude why.
 3. Everything else gives the terminal prompt: `timeout`, `cancelled`, unknown `id`, malformed body,
    relay down or restarted, gate disarmed. These never become `allow`.
+4. The relay accepts a request only if a paired device polled `GET /pending` in the last 10 s. If polling
+   stops, its pending requests are `cancelled`. Nobody watching means the terminal prompt, not a 90 s stall.

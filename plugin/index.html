@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
+    <title>Approval Gate</title>
+    <style>
+      html, body {
+        margin: 0;
+        min-height: 100%;
+        /* ER brand dark-theme surface (#232323) + Neutral-200 text (#E5E5E5). */
+        background: #232323;
+        color: #E5E5E5;
+        font: 14px/1.4 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+        touch-action: manipulation;
+        -webkit-text-size-adjust: 100%;
+        overscroll-behavior: none;
+      }
+      main { margin: 0 auto; padding: 20px 16px; max-width: 560px; box-sizing: border-box; }
+      h1 { font-size: 18px; font-weight: 600; margin: 0 0 16px; }
+      .mirror { background: #111; border: 1px solid #3E3E3E; border-radius: 12px; padding: 14px; font-family: ui-monospace, Menlo, Consolas, monospace; color: #8BE08B; }
+      .mirror .row { display: flex; justify-content: space-between; gap: 12px; color: #6FB86F; }
+      .mirror pre { margin: 10px 0; padding: 10px; border: 1px solid #2F4F2F; border-radius: 8px; white-space: pre-wrap; word-break: break-word; font: inherit; color: #B6F5B6; min-height: 3em; }
+      .mirror .risk { color: #B6F5B6; font-weight: 700; min-height: 1.4em; }
+      .mirror .hint { color: #4F8F4F; font-size: 12px; }
+      .note { font-size: 12px; color: #919191; margin: 10px 0 18px; }
+      button { font: inherit; padding: 10px 14px; border-radius: 10px; border: 1px solid #4E4E4E; background: #2E2E2E; color: #E5E5E5; }
+      button.danger { border-color: #7A3A3A; }
+      details { margin-top: 20px; border-top: 1px solid #3E3E3E; padding-top: 12px; }
+      summary { cursor: pointer; color: #C5C5C5; }
+      label { display: block; margin: 12px 0 4px; font-size: 12px; color: #A5A5A5; }
+      input { width: 100%; box-sizing: border-box; padding: 10px; border-radius: 8px; border: 1px solid #4E4E4E; background: #1B1B1B; color: #E5E5E5; font: 13px ui-monospace, Menlo, Consolas, monospace; }
+      .actions { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+      #pairStatus { font-size: 12px; color: #A5A5A5; margin-top: 10px; min-height: 1.4em; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

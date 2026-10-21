@@ -142,6 +142,7 @@ class EndToEnd(unittest.TestCase):
         self.base = f"http://127.0.0.1:{self.httpd.server_port}"
         (self.home / "relay.json").write_text(json.dumps({"url": self.base}))
         R.set_armed(self.home, True, by="test")
+        urllib.request.urlopen(urllib.request.Request(self.base + "/pending", headers={"Authorization": f"Bearer {DEVICE_TOKEN}"}))
 
     def tearDown(self):
         self.httpd.shutdown()
