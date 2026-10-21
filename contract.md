@@ -114,4 +114,5 @@ In every other case it prints nothing and exits 0, and Claude Code shows its own
 4. The relay accepts a request only if a paired device polled `GET /pending` in the last 10 s. If polling
    stops, its pending requests are `cancelled`, and a decision that arrives afterwards gets `409`.
    Nobody watching means the terminal prompt, not a 90 s stall.
-5. After 60 s with no device polling, the relay disarms the gate (`source: relay`).
+5. After 60 s with no device polling, the relay disarms the gate (`source: relay`). The 60 s count from
+   the later of the last poll and the moment of arming, so arming on the PC before opening the plugin works.

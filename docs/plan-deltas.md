@@ -22,7 +22,7 @@ format; this file explains how the code got there.
 
 | Change | Detail |
 |---|---|
-| Disarm on exit | The plugin disarms (`source: glasses`, `reason: plugin exit`) on its double-tap exit and on `SYSTEM_EXIT_EVENT` / `ABNORMAL_EXIT_EVENT`. If the plugin dies without saying so, the relay disarms after **60 s** with no device polling (`source: relay`). |
+| Disarm on exit | The plugin disarms (`source: glasses`, `reason: plugin exit`) on its double-tap exit and on `SYSTEM_EXIT_EVENT` / `ABNORMAL_EXIT_EVENT`. If the plugin dies without saying so, the relay disarms after **60 s** with no device polling (`source: relay`), counted from the later of the last poll and the arm. |
 | Source on every arm and disarm | `gate.log` records `glasses`, `phone`, `hotkey`, `cli` or `relay`, plus the device id. The relay rejects a device's arm or disarm without a valid `source`. |
 | Tap then double-tap | `plugin/test/input.test.ts` replays the SDK envelopes (a tap with no `eventType`, then `eventType: 3`) and asserts deny. |
 
