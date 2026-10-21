@@ -1,10 +1,10 @@
 # Approval Gate
 
-Claude Code permission prompts on Even Realities G2 glasses. Tap approves, double-tap denies.
-If nobody answers, the normal terminal prompt appears.
+Claude Code permission prompts on your Even Realities G2 glasses. Tap to approve, double-tap to
+deny. If nobody answers, the normal terminal prompt appears.
 
 Even Hub plugins run only in the foreground, so the gate is a mode you turn on, not a background
-notifier. While it is armed and the plugin is open, prompts go to the glasses. Otherwise everything
+notifier. While it is armed and the plugin is open, prompts go to the glasses. Otherwise Claude Code
 behaves as if the gate were not installed.
 
 ```
@@ -12,95 +12,147 @@ Claude Code ──PermissionRequest──▶ hook ──POST /requests──▶ 
             ◀──allow / deny / nothing── hook ◀──GET …/wait──  relay ◀──POST …/decide── plugin ◀── tap / double-tap
 ```
 
-The hook, the relay and the plugin share no code, only [contract.md](contract.md). Where the code
-differs from the original build plan, and why, is in [docs/plan-deltas.md](docs/plan-deltas.md).
-
-The hook answers Claude Code with `{"hookSpecificOutput": {"hookEventName": "PermissionRequest",
-"decision": {"behavior": "allow"}}}` (or `"deny"` plus a `message`), and only for an explicit answer
-from the glasses. Otherwise it prints nothing.
-
-| Piece | Where | What it is |
+| Piece | Runs on | What it is |
 |---|---|---|
 | `hook/approval_gate_hook.py` | PC | Claude Code `PermissionRequest` hook. Stdlib Python, run with `-I`. |
 | `relay/relay.py` | PC | The only thing the phone talks to. Stdlib `http.server`, in-memory queue, JSONL log. |
-| `relay/gatectl.py` | PC | Pair and revoke devices, arm and disarm from the PC, status. |
-| `plugin/` | phone + glasses | Even Hub plugin (Vite + TypeScript + `@evenrealities/even_hub_sdk`). |
+| `relay/gatectl.py` | PC | Pair and revoke devices, arm and disarm, status, log. |
+| `plugin/` | phone + glasses | Even Hub plugin: Vite, TypeScript, `@evenrealities/even_hub_sdk`. |
 
-## Ports
+The three pieces share no code, only [contract.md](contract.md). Where the code differs from the
+original build plan, and why, is in [docs/plan-deltas.md](docs/plan-deltas.md).
 
-| Port | What | Why this one |
-|---|---|---|
-| 8797 | Relay, on `127.0.0.1` only | 8787, the usual pick, is the Orion MCP host on the development PC |
-| 5180 | Plugin dev server (Vite, `strictPort`) | 5173, Vite's default, was already in use |
-| 9898 | Simulator automation API | The simulator README's own example |
+## Requirements
 
-Change the relay port with `relay.py --port`. The hook finds the relay through
-`%APPDATA%\approval-gate\relay.json`, so nothing else needs editing.
+- Windows PC with Python 3.10+ (3.12+ for the demo recorder), Node 20.17+, and Claude Code (tested
+  with 2.1.306).
+- Tailscale on the PC and the phone, with MagicDNS and HTTPS certificates enabled on the tailnet.
+- An Even Realities G2 with the Even app 2.2.10+. Or no glasses: `evenhub-simulator` runs the whole
+  flow on the PC.
 
-## Run it in the simulator
+## Install
 
-Needs Python 3.10+, Node 20.17+ and Claude Code 2.1.306+ (`args` in hook config).
+### 1. Run the relay
 
 ```powershell
-# 1. Relay (keep this terminal open). State lives in %APPDATA%\approval-gate.
-python relay/relay.py                       # http://127.0.0.1:8797
-
-# 2. Pair the simulator. Prints a link carrying the relay URL and a one-time-shown token.
-python relay/gatectl.py pair --label simulator
-
-# 3. Plugin dev server, then the simulator on the pairing link
-cd plugin
-npm install
-npm run dev                                 # http://127.0.0.1:5180
-npx evenhub-simulator "<link from step 2>" --automation-port 9898
-
-# 4. Register the hook for every project (keeps a .approval-gate.bak copy of settings.json)
-python scripts/install_hook.py
+python relay/relay.py                         # 127.0.0.1:8797. Keep it running.
 ```
 
-Tap the simulated glasses (or run `python scripts/sim.py click`) to arm. From then on, Claude Code
-prompts for `Bash`, `Write` and `Edit` appear on the glasses. `scripts/sim.py` drives the simulator
-(`click`, `double`, `down`, `up`, `shot`) for recording the demo.
+State lives in `%APPDATA%\approval-gate`. The relay listens on loopback only, refuses to bind
+`0.0.0.0`, and disarms the gate when it stops.
 
-To try the hook in one project first, use
-`python scripts/install_hook.py --settings <project>/.claude/settings.local.json`. To remove it, run
-`python scripts/install_hook.py --uninstall`.
+### 2. Let the phone reach it
 
-## Gestures
+```powershell
+tailscale serve --bg --https=443 http://127.0.0.1:8797
+```
+
+This publishes the relay to your tailnet only, at `https://<pc>.<tailnet>.ts.net`, with a real
+certificate. There is no port forwarding, no public IP, and no certificate to manage.
+
+### 3. Pair the phone
+
+```powershell
+python relay/gatectl.py pair --label phone --relay-url https://<pc>.<tailnet>.ts.net `
+    --plugin-url http://<tailnet-ip>:5180
+```
+
+This prints the device token once, plus a link carrying the relay URL and the token. The PC stores
+only a hash of the token. `gatectl.py devices` lists paired devices, and `gatectl.py revoke dev_…`
+unpairs one.
+
+### 4. Install the plugin
+
+The plugin's `network` whitelist is fixed into the package when it is built, and your relay's
+address is yours alone. So every user builds their own. Two ways:
+
+**A. Sideload the dev build** (quickest; the PC serves the plugin):
+
+```powershell
+cd plugin
+npm install
+$env:GATE_DEV_HOST = "<tailnet-ip>"; npm run dev    # serve the plugin on the tailnet only
+npx evenhub qr --url "<link from step 3>"           # scan with the Even app
+```
+
+**B. Pack your own `.ehpk`** with your relay in the whitelist:
+
+```powershell
+cd plugin
+npm install
+npm run pack -- --relay https://<pc>.<tailnet>.ts.net --id com.<you>.approvalgate
+```
+
+This writes `app.local.json` (gitignored) from `app.json`, whitelists only your relay, builds, and
+runs `evenhub pack`. To install it, use your own Even Hub developer account: `evenhub login`,
+`evenhub create approval-gate.ehpk --name "Approval Gate" --tagline "Claude Code prompts on G2"`,
+`evenhub promote 0.1.0 --to beta`, then `evenhub testers add <your email>`. After that, install the
+beta from the Even app. Open the plugin's phone page once, and paste the relay URL and token under
+**Pairing**.
+
+Whether Even will list one shared build is an open question in
+[docs/discord-questions.md](docs/discord-questions.md).
+
+### 5. Register the hook
+
+```powershell
+python scripts/install_hook.py                # every project: ~/.claude/settings.json
+python scripts/install_hook.py --settings <project>/.claude/settings.local.json   # or one project
+python scripts/install_hook.py --uninstall
+```
+
+The installer keeps a `.approval-gate.bak` copy of the settings file and leaves your other hooks
+alone. It registers `PermissionRequest` with matcher `Bash|Write|Edit` and `timeout: 100`. While the
+gate is disarmed, the hook exits in about 0.1 s and prints nothing.
+
+### 6. Optional: a disarm hotkey
+
+```powershell
+$s = (New-Object -ComObject WScript.Shell).CreateShortcut(
+    "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Approval Gate - disarm.lnk")
+$s.TargetPath = (Get-Command pythonw).Source
+$s.Arguments = '"<repo>\relay\gatectl.py" disarm --source hotkey'
+$s.Hotkey = "CTRL+ALT+D"
+$s.Save()
+```
+
+## Use
+
+Open the plugin on the glasses and tap to arm. From then on, Claude Code's prompts for `Bash`,
+`Write` and `Edit` come to the glasses.
 
 | Screen | Tap | Double-tap | Swipe down / up |
 |---|---|---|---|
-| Gate off | Arm | Exit plugin (disarming first) | — |
+| Gate off | Arm | Exit (disarming first) | — |
 | Armed, idle | — | Disarm | — |
 | Prompt | Approve | Deny | Full command / summary |
 | Approved / Denied | — | — | — |
 
-A tap approves only after the prompt has been on screen for 0.7 s. The approval is then held for
-0.35 s, so if the touchpad reports a double-tap as tap + double-tap, the deny wins.
+A prompt shows the session, the tool, a countdown, the hook's one-line summary and `HIGH RISK` when
+it applies. A tap approves only after the prompt has been on screen for 0.7 s, and the approval
+then waits 0.35 s, so a double-tap that the touchpad reports as tap + double-tap still denies. A
+deny tells Claude why and asks it not to retry.
 
-The phone page mirrors the glasses and has a Disarm button, but it cannot approve. Approval needs the
-glasses.
+The phone page mirrors the glasses and has a Disarm button. It cannot approve.
 
-## On the phone (Phase 4)
+`python relay/gatectl.py log` shows recent outcomes. `status` shows the armed state and the relay
+URL. `arm` and `disarm` work from the PC. Everything is also in `%APPDATA%\approval-gate\gate.log`.
 
-The phone has to reach the relay over TLS, from anywhere. With Tailscale on the PC and the phone:
+## Threat model
 
-```powershell
-tailscale serve --bg --https=443 http://127.0.0.1:8797   # needs MagicDNS + HTTPS certs on the tailnet
-python relay/gatectl.py pair --label phone --relay-url https://<pc>.<tailnet>.ts.net `
-    --plugin-url http://<tailnet-ip>:5180
-$env:GATE_DEV_HOST = "<tailnet-ip>"; npm run dev          # in plugin/
-npx evenhub qr --url "<link from pair>"                   # scan with the Even app
-```
+Approval Gate is a remote control for commands on your PC. Read this before arming it.
 
-The relay keeps listening on loopback only. `tailscale serve` is what exposes it, on the tailnet only,
-with a real certificate. That gives TLS without managing certificates, and there is no listener on
-any other interface. Add `https://<pc>.<tailnet>.ts.net` to the `network` whitelist in
-`plugin/app.json` before you pack.
+**What it protects.** Your shell and files, which Claude Code acts on. Also the credentials that
+can approve: device tokens on the phone, and `hook.key` on the PC.
 
-## Security
+**Who it assumes might misbehave:**
 
-This is a remote control for commands on your PC. These rules ship in v1:
+- **The agent.** A model can be wrong or prompt-injected. It can try to label a command as
+  something else, hide it in a long chain, or reach for credentials.
+- **Other devices on your tailnet.** They can reach the relay, but they hold no token.
+- **Time.** A stale prompt, a replayed decision, or a phone that went to sleep mid-prompt.
+
+**What ships in v1:**
 
 - **Silence means terminal.** Timeout, malformed input, unknown id, relay down or restarted, gate
   disarmed, nobody watching: the hook prints nothing, and Claude Code shows its own prompt. No error
@@ -108,40 +160,92 @@ This is a remote control for commands on your PC. These rules ship in v1:
 - **The glasses can never approve these.** The hook sends them straight to the terminal:
   - `rm -rf` and its Windows equivalents, `git push --force`, `git reset --hard`, `git clean -f`
   - `sudo`/`runas`, `curl | sh`, `iex`, `eval`, `base64 -d`
-  - anything touching `.ssh`, `.env`, `settings.json`, `.claude/`, `.git/hooks`, or the gate's own files
+  - anything touching `.ssh`, `.env`, `settings.json`, `.claude/`, `.git/hooks`, credential files,
+    or the gate's own files
   - commands with invisible or bidi characters
   - commands too long to show in full (over 200 characters)
 - **The glasses show the hook's summary.** The hook builds it from `tool_input`, never from the
   agent's description. In a long chain, the risky part leads (`rm -r build …+1`).
-- **Each side has its own credential.** The hook uses `hook.key`. Each phone uses a device token
-  minted by `gatectl.py pair`, stored on the PC as a SHA-256 hash, and revocable. Logs carry the
-  device id, never the token.
-- **One decision per request.** A nonce from `/pending` must be echoed back. A replayed, late or
-  second decision gets `409`.
-- **Short expiry.** 90 s, or 45 s for high risk. If no device has polled for 10 s, the relay refuses
-  new requests and cancels pending ones, so a sleeping phone costs nothing.
-- **Arming is explicit.** Arm from the glasses or with `gatectl.py arm`. Disarm with a double-tap,
-  the phone button, or `gatectl.py disarm --source hotkey` bound to a hotkey. The relay disarms when
-  it stops, when the plugin exits, and after 60 s with no device polling. `gate.log` records the
-  source of every switch: `glasses`, `phone`, `hotkey`, `cli` or `relay`.
-- **Nothing secret leaves the PC.** No file contents (Write and Edit send a path and a line count),
-  home paths become `~`, and secret-shaped strings become `[secret]`.
-- **Everything is logged.** Every request, decision, arm and disarm goes to
-  `%APPDATA%\approval-gate\gate.log` (JSONL).
+- **Separate credentials.** The hook uses `hook.key`, which can create requests but not decide them.
+  Each phone has its own device token, which can decide but not create, is stored on the PC as a
+  hash, and can be revoked. Logs name the device id, never the token.
+- **One decision per request.** The decision must echo the nonce from `/pending`. A replayed, late
+  or second decision gets `409`.
+- **Short expiry.** 90 s, or 45 s for high risk.
+- **Nobody watching means terminal.** If no device has polled for 10 s, the relay refuses new
+  requests and cancels pending ones. A phone that sleeps mid-prompt hands the prompt back to the
+  terminal at once, and its late tap gets `409`.
+- **Arming is explicit and visible.** The idle screen always shows the armed state. You can disarm
+  with a double-tap, the phone button, the hotkey, or `gatectl.py disarm`. The relay disarms on
+  stop, on plugin exit, and after 60 s with no device polling. `gate.log` records the source of
+  every switch.
+- **Nothing secret leaves the PC.** Write and Edit send a path and a line count, never contents.
+  Home paths become `~`, and secret-shaped strings become `[secret]`.
+- **Everything is logged.** Every request, decision, arm and disarm goes to `gate.log` (JSONL),
+  with timestamps and the deciding device.
 
-What this does **not** protect against:
+**What it does not protect against:**
 
-- **Someone with your unlocked phone and your glasses while the gate is armed.** They can approve
-  whatever comes in. Disarm when you put them down.
-- An agent that writes a harmless-looking command which does harm through files it wrote earlier.
-  The glasses show the command, not what the scripts it calls will do.
-- The denylist is pattern-based. It is a backstop, not a sandbox. The real check is you reading the
-  summary.
+- **Someone with your unlocked phone while the gate is armed.** The phone page can't approve, but
+  with your glasses they can approve whatever comes in. So can anyone who pulls the device token out
+  of the app. Disarm when you put the phone down, and revoke the device (`gatectl.py revoke`) if you
+  lose it.
+- **Harm done through files.** An agent can run a harmless-looking command that does damage through
+  a script it wrote earlier. The glasses show the command, not what the script will do.
+- **Clever disguises.** The denylist is pattern-based, so it is a backstop, not a sandbox. A
+  disguised `rm` reaches the glasses as what it literally says, and the real check is you reading
+  the summary.
+- **A compromised PC, phone or Even app.** Whoever controls those controls the gate.
 
-## Tests
+## Configuration
+
+| Port | What | Why this one |
+|---|---|---|
+| 8797 | Relay, `127.0.0.1` only (`relay.py --port`) | 8787, the obvious pick, is the Orion MCP host on the development PC |
+| 5180 | Plugin dev server (Vite, `strictPort`, `GATE_DEV_HOST` to move off loopback) | 5173, Vite's default, was already in use |
+| 9898 | Simulator automation API | The simulator README's own example |
+
+The hook finds the relay through `relay.json`, so changing the port needs no other edits. Files in
+`%APPDATA%\approval-gate` (or `APPROVAL_GATE_HOME`):
+
+| File | What |
+|---|---|
+| `armed` | Present while the gate is armed. The hook checks only this. |
+| `hook.key` | The hook's credential, created by the relay on first start. |
+| `devices.json` | Paired devices: id, label, token hash. |
+| `relay.json` | The running relay's URL and pid. |
+| `gate.log` | JSONL record of requests, decisions, arm and disarm. |
+
+## Develop
+
+Without glasses, the simulator runs the whole loop:
 
 ```powershell
-python -m unittest discover -s relay     # relay: round trip, nonce, expiry, presence, auth, sources
-python -m unittest discover -s hook      # hook rules, plus the real hook run with python -I against a live relay
+python relay/relay.py
+python relay/gatectl.py pair --label simulator           # prints the simulator command with the link
+cd plugin; npm install; npm run dev
+npx evenhub-simulator "<link>" --automation-port 9898
+python scripts/sim.py click | double | down | up | shot glasses.png
+```
+
+Tests:
+
+```powershell
+python -m unittest discover -s relay     # round trip, nonce, expiry, presence, backstop, auth, sources
+python -m unittest discover -s hook      # rules and redaction, plus the real hook run with python -I against a live relay
+python -m unittest discover -s scripts   # demo cut planning
 cd plugin; npm test; npx tsc --noEmit    # gestures (tap then double-tap denies), types
 ```
+
+The 60-second demo is scripted. `python scripts/demo.py check`, then `record`, then `cut`. It needs
+ffmpeg (`winget install Gyan.FFmpeg.Essentials`). See the docstring at the top of `scripts/demo.py`.
+
+**Unverified until it runs on hardware:** whether the re-poll on `FOREGROUND_ENTER_EVENT` fires, and
+how the G2 firmware wraps the summary. Both are marked `TODO(hardware)` in the code. Two open
+questions from the plan also need hardware: whether the WebView survives the phone's screen turning
+off (the nobody-watching rule covers the case where it doesn't), and whether a 45 s countdown is
+readable at a glance.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
