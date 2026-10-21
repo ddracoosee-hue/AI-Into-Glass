@@ -3,19 +3,13 @@ import {
   TextContainerProperty,
   CreateStartUpPageContainer,
   TextContainerUpgrade,
-  OsEventTypeList,
 } from '@evenrealities/even_hub_sdk'
 import { AuthError, RelayClient, type PendingRequest, type Poll } from './relay'
+import { createInput, type Screen } from './input'
 import { mountPhone, type Frame } from './phone'
 
 const POLL_MS = 2000
 const RESULT_MS = 1500
-// A prompt must be on screen this long before a tap can approve it, so a tap
-// meant for something else never approves a prompt that just arrived.
-const GRACE_MS = 700
-// A tap waits this long before approving, in case it is the first half of a
-// double-tap. If the touchpad reports a double as tap + double, the deny wins.
-const DOUBLE_WINDOW_MS = 350
 const KEY_RELAY = 'gate.relay'
 const KEY_TOKEN = 'gate.token'
 
@@ -125,7 +119,7 @@ function render(): void {
 }
 
 function setView(next: View): void {
-  if (next.kind !== 'prompt') cancelTap()
+  if (next.kind !== 'prompt') input.cancelTap()
   view = next
   render()
 }
@@ -235,78 +229,45 @@ window.setInterval(() => {
 
 // ---- input -------------------------------------------------------------------
 
-let tapTimer: number | undefined
-
-function cancelTap(): void {
-  window.clearTimeout(tapTimer)
-  tapTimer = undefined
-}
-
-function onTap(): void {
-  if (view.kind === 'prompt') {
-    if (view.sending || now() - view.shownAt < GRACE_MS) return
-    const id = view.req.id
-    cancelTap()
-    tapTimer = window.setTimeout(() => {
-      tapTimer = undefined
-      if (view.kind === 'prompt' && view.req.id === id) void send('approve')
-    }, DOUBLE_WINDOW_MS)
-  } else if (view.kind === 'idle' && !view.armed) {
-    void setArmed(true, 'glasses')
-  } else if (view.kind === 'offline') {
-    void poll()
+function screen(): Screen {
+  switch (view.kind) {
+    case 'prompt':
+      return view.sending ? { kind: 'busy' } : { kind: 'prompt', id: view.req.id, shownAt: view.shownAt }
+    case 'idle':
+      return { kind: view.armed ? 'armed' : 'off' }
+    case 'result':
+      return { kind: 'busy' }
+    default:
+      return { kind: view.kind }
   }
 }
 
-function onDoubleTap(): void {
-  cancelTap()
-  if (view.kind === 'prompt') void send('deny')
-  else if (view.kind === 'idle' && view.armed) void setArmed(false, 'glasses')
-  else if (view.kind !== 'result') void bridge.shutDownPageContainer(1)
-}
-
-function onSwipe(down: boolean): void {
-  if (view.kind === 'prompt' && !view.sending && view.detail !== down) setView({ ...view, detail: down })
-}
-
-// CLICK_EVENT is 0 and protobuf omits zero values, so a tap arrives with no
-// eventType. Resolve the default inside the envelope check; flattening it would
-// read every scroll and lifecycle event as a tap, and here a tap approves.
-function eventTypeOf(envelope?: { eventType?: OsEventTypeList }): OsEventTypeList | null {
-  if (!envelope) return null
-  return envelope.eventType ?? OsEventTypeList.CLICK_EVENT
-}
-
-const unsubscribe = bridge.onEvenHubEvent(event => {
-  const sys = eventTypeOf(event.sysEvent)
-  const text = eventTypeOf(event.textEvent)
-  const is = (type: OsEventTypeList) => sys === type || text === type
-
-  if (sys === OsEventTypeList.FOREGROUND_ENTER_EVENT) {
+const input = createInput(screen, {
+  approve: id => {
+    if (view.kind === 'prompt' && view.req.id === id) void send('approve')
+  },
+  deny: () => void send('deny'),
+  arm: () => void setArmed(true, 'glasses'),
+  disarm: () => void setArmed(false, 'glasses'),
+  exit: () => void bridge.shutDownPageContainer(1),
+  retry: () => void poll(),
+  swipe: down => {
+    if (view.kind === 'prompt' && !view.sending && view.detail !== down) setView({ ...view, detail: down })
+  },
+  foreground: entered => {
+    foreground = entered
     // Back in front: anything shown before is stale. Ask the relay again now.
-    foreground = true
-    cancelTap()
-    void poll()
-    return
-  }
-  if (sys === OsEventTypeList.FOREGROUND_EXIT_EVENT) {
-    foreground = false
-    cancelTap()
-    window.clearTimeout(pollTimer)
-    return
-  }
-  if (sys === OsEventTypeList.SYSTEM_EXIT_EVENT || sys === OsEventTypeList.ABNORMAL_EXIT_EVENT) {
-    cancelTap()
-    unsubscribe()
-    return
-  }
-  // Explicit ids first; CLICK_EVENT is the fallback an untyped envelope lands on, so it goes last.
-  if (is(OsEventTypeList.DOUBLE_CLICK_EVENT)) return onDoubleTap()
-  if (is(OsEventTypeList.SCROLL_BOTTOM_EVENT)) return onSwipe(true)
-  if (is(OsEventTypeList.SCROLL_TOP_EVENT)) return onSwipe(false)
-  if (is(OsEventTypeList.LONG_PRESS_EVENT) || is(OsEventTypeList.LONG_PRESS_RELEASE_EVENT)) return
-  if (is(OsEventTypeList.CLICK_EVENT)) return onTap()
+    if (entered) void poll()
+    else window.clearTimeout(pollTimer)
+  },
+  systemExit: () => unsubscribe(),
+}, {
+  now,
+  setTimeout: (fn, ms) => window.setTimeout(fn, ms),
+  clearTimeout: handle => window.clearTimeout(handle as number),
 })
+
+const unsubscribe = bridge.onEvenHubEvent(event => input.handle(event))
 
 // ---- phone page ----------------------------------------------------------------
 

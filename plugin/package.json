@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "test": "node --test \"test/*.test.ts\"",
     "pack": "npm run build && evenhub pack app.json dist -o approval-gate.ehpk",
     "simulate": "evenhub-simulator http://127.0.0.1:5180 --automation-port 9898"
   },
