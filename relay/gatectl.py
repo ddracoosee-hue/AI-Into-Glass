@@ -4,7 +4,7 @@
     python relay/gatectl.py pair --label pixel   # mint a device token for the plugin
     python relay/gatectl.py devices              # list paired devices
     python relay/gatectl.py revoke dev_1a2b3c    # unpair one
-    python relay/gatectl.py arm | disarm         # PC-side switch; bind disarm to a hotkey
+    python relay/gatectl.py arm | disarm         # PC-side switch; the hotkey runs `disarm --source hotkey`
     python relay/gatectl.py status               # armed state, relay URL, last log lines
 """
 from __future__ import annotations
@@ -45,8 +45,9 @@ def main() -> None:
     sub.add_parser("devices", help="list paired devices")
     p = sub.add_parser("revoke", help="unpair a device")
     p.add_argument("device_id")
-    sub.add_parser("arm", help="arm the gate from the PC")
-    sub.add_parser("disarm", help="disarm the gate from the PC")
+    for cmd in ("arm", "disarm"):
+        p = sub.add_parser(cmd, help=f"{cmd} the gate from the PC")
+        p.add_argument("--source", choices=("cli", "hotkey"), default="cli", help="recorded in gate.log")
     sub.add_parser("status", help="armed state, relay and the last log lines")
     args = parser.parse_args()
 
@@ -65,7 +66,7 @@ def main() -> None:
         R.append_log(home, "revoke", device=args.device_id)
         print(f"Revoked {args.device_id}")
     elif args.cmd in ("arm", "disarm"):
-        R.set_armed(home, args.cmd == "arm", by="pc")
+        R.set_armed(home, args.cmd == "arm", args.source)
         print("Gate ARMED" if args.cmd == "arm" else "Gate disarmed")
     elif args.cmd == "status":
         relay_file = home / "relay.json"

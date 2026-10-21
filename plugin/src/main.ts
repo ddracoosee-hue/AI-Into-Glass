@@ -220,9 +220,9 @@ async function send(decision: 'approve' | 'deny'): Promise<void> {
   }
 }
 
-async function setArmed(on: boolean): Promise<void> {
+async function setArmed(on: boolean, source: 'glasses' | 'phone'): Promise<void> {
   try {
-    await client?.setArmed(on)
+    await client?.setArmed(on, source)
   } catch (err) {
     console.error('arm/disarm failed', err)
   }
@@ -252,7 +252,7 @@ function onTap(): void {
       if (view.kind === 'prompt' && view.req.id === id) void send('approve')
     }, DOUBLE_WINDOW_MS)
   } else if (view.kind === 'idle' && !view.armed) {
-    void setArmed(true)
+    void setArmed(true, 'glasses')
   } else if (view.kind === 'offline') {
     void poll()
   }
@@ -261,7 +261,7 @@ function onTap(): void {
 function onDoubleTap(): void {
   cancelTap()
   if (view.kind === 'prompt') void send('deny')
-  else if (view.kind === 'idle' && view.armed) void setArmed(false)
+  else if (view.kind === 'idle' && view.armed) void setArmed(false, 'glasses')
   else if (view.kind !== 'result') void bridge.shutDownPageContainer(1)
 }
 
@@ -332,7 +332,7 @@ mirror = mountPhone(document.querySelector<HTMLDivElement>('#app')!, {
     void poll()
   },
   async disarm() {
-    await setArmed(false)
+    await setArmed(false, 'phone')
   },
 }, await load(KEY_RELAY))
 render()

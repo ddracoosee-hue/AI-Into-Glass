@@ -37,6 +37,7 @@ KEEP_FINISHED = 600  # seconds a decided request stays answerable to a late /wai
 PRESENCE = 10  # seconds since a device last polled /pending before the gate stops accepting requests
 WAIT_RE = re.compile(r"/requests/(req_[0-9A-Z]{26})/wait")
 DECIDE_RE = re.compile(r"/requests/(req_[0-9A-Z]{26})/decide")
+DEVICE_SOURCES = ("glasses", "phone")  # what a paired device may report; the PC logs "cli"/"hotkey", the relay "relay"
 CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 CORS = {
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -72,7 +73,8 @@ def append_log(home: Path, event: str, **fields) -> None:
         f.write(line + "\n")
 
 
-def set_armed(home: Path, on: bool, by: str) -> None:
+def set_armed(home: Path, on: bool, source: str, by: str | None = None, reason: str | None = None) -> None:
+    """Arm or disarm, logging where it came from: glasses, phone, hotkey, cli or relay."""
     flag = home / "armed"
     if on == flag.exists():
         return
@@ -80,7 +82,7 @@ def set_armed(home: Path, on: bool, by: str) -> None:
         flag.write_text(now_iso())
     else:
         flag.unlink(missing_ok=True)
-    append_log(home, "arm" if on else "disarm", by=by)
+    append_log(home, "arm" if on else "disarm", source=source, by=by, **({"reason": reason} if reason else {}))
 
 
 def load_devices(home: Path) -> dict:
@@ -322,7 +324,11 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/arm", "/disarm"):
             if not device:
                 return self.reply(401, {"error": "unauthorized"})
-            set_armed(self.relay.home, path == "/arm", by=device)
+            source, reason = (body or {}).get("source"), (body or {}).get("reason")
+            if source not in DEVICE_SOURCES:
+                return self.reply(400, {"error": "source must be glasses or phone"})
+            reason = reason[:40] if isinstance(reason, str) and reason.isprintable() else None
+            set_armed(self.relay.home, path == "/arm", source, by=device, reason=reason)
             self.relay.sweep()  # disarm sends every waiting hook back to the terminal now
             return self.reply(200, {"armed": self.relay.armed})
         self.reply(404, {"error": "not found"})
@@ -369,7 +375,7 @@ def serve(args) -> None:
         pass
     finally:
         httpd.server_close()
-        set_armed(home, False, by="relay_stop")
+        set_armed(home, False, "relay", reason="relay stopped")
         (home / "relay.json").unlink(missing_ok=True)
         append_log(home, "relay_stop")
 

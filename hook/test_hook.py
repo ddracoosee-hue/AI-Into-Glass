@@ -141,7 +141,7 @@ class EndToEnd(unittest.TestCase):
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         self.base = f"http://127.0.0.1:{self.httpd.server_port}"
         (self.home / "relay.json").write_text(json.dumps({"url": self.base}))
-        R.set_armed(self.home, True, by="test")
+        R.set_armed(self.home, True, "cli")
         urllib.request.urlopen(urllib.request.Request(self.base + "/pending", headers={"Authorization": f"Bearer {DEVICE_TOKEN}"}))
 
     def tearDown(self):
@@ -195,7 +195,7 @@ class EndToEnd(unittest.TestCase):
         self.assertIn('"event": "timeout"', (self.home / "gate.log").read_text(encoding="utf-8"))
 
     def test_disarmed_is_silent_and_never_calls_the_relay(self):
-        R.set_armed(self.home, False, by="test")
+        R.set_armed(self.home, False, "cli")
         self.assertIsNone(self.run_hook(bash("git push origin main")))
         self.assertEqual(self.relay.requests, {})
 

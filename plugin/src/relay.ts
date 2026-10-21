@@ -78,8 +78,9 @@ export class RelayClient {
     throw new Error(`relay answered ${res.status}`)
   }
 
-  async setArmed(on: boolean): Promise<boolean> {
-    const res = await this.call('POST', on ? '/arm' : '/disarm', {})
+  /** `source` lands in gate.log: which surface flipped the switch. */
+  async setArmed(on: boolean, source: 'glasses' | 'phone', reason?: string): Promise<boolean> {
+    const res = await this.call('POST', on ? '/arm' : '/disarm', { source, ...(reason ? { reason } : {}) })
     if (res.status !== 200) throw new Error(`relay answered ${res.status}`)
     return (await res.json()).armed === true
   }

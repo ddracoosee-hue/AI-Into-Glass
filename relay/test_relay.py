@@ -33,7 +33,7 @@ class RelayTest(unittest.TestCase):
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         self.base = f"http://127.0.0.1:{self.httpd.server_port}"
         self.hook_key = self.relay.hook_key
-        R.set_armed(self.home, True, by="test")
+        R.set_armed(self.home, True, "cli")
         self.call("GET", "/pending", DEVICE_TOKEN)  # a device is watching
 
     def tearDown(self):
@@ -150,7 +150,7 @@ class Expiry(RelayTest):
 
 class Arming(RelayTest):
     def test_disarmed_refuses_new_requests(self):
-        R.set_armed(self.home, False, by="test")
+        R.set_armed(self.home, False, "cli")
         status, body, _ = self.call("POST", "/requests", self.hook_key, request_body())
         self.assertEqual((status, body["error"]), (409, "disarmed"))
 
@@ -158,13 +158,27 @@ class Arming(RelayTest):
         rid = self.create()
         t, result = self.wait_async(rid)
         time.sleep(0.3)
-        status, body, _ = self.call("POST", "/disarm", DEVICE_TOKEN, {})
+        status, body, _ = self.call("POST", "/disarm", DEVICE_TOKEN, {"source": "glasses"})
         self.assertEqual((status, body["armed"]), (200, False))
         t.join(5)
         self.assertEqual(result["r"][1]["status"], "cancelled")
         self.assertFalse((self.home / "armed").exists())
         self.assertEqual(self.call("GET", "/pending", DEVICE_TOKEN)[2]["X-Gate-Armed"], "0")
-        self.assertEqual(self.call("POST", "/arm", DEVICE_TOKEN, {})[1]["armed"], True)
+        self.assertEqual(self.call("POST", "/arm", DEVICE_TOKEN, {"source": "glasses"})[1]["armed"], True)
+
+    def test_every_arm_and_disarm_logs_its_source(self):
+        self.call("POST", "/disarm", DEVICE_TOKEN, {"source": "phone"})
+        self.call("POST", "/arm", DEVICE_TOKEN, {"source": "glasses"})
+        R.set_armed(self.home, False, "hotkey")
+        R.set_armed(self.home, True, "cli")
+        switches = [(e["event"], e["source"], e["by"]) for e in self.log_events() if e["event"] in ("arm", "disarm")]
+        self.assertEqual(switches, [("arm", "cli", None), ("disarm", "phone", "dev_abc123"), ("arm", "glasses", "dev_abc123"),
+                                    ("disarm", "hotkey", None), ("arm", "cli", None)])
+
+    def test_a_device_must_say_where_the_switch_came_from(self):
+        for body in ({}, {"source": "hotkey"}, {"source": "relay"}, {"source": None}):
+            self.assertEqual(self.call("POST", "/disarm", DEVICE_TOKEN, body)[0], 400, body)
+        self.assertTrue((self.home / "armed").exists())
 
     def test_vanished_waiter_cancels(self):
         rid = self.create()
@@ -206,7 +220,7 @@ class Auth(RelayTest):
         rid = self.create()
         self.assertEqual(self.call("GET", f"/requests/{rid}/wait", DEVICE_TOKEN)[0], 401)
         self.assertEqual(self.call("POST", f"/requests/{rid}/decide", self.hook_key, {"decision": "approve", "nonce": "x"})[0], 401)
-        self.assertEqual(self.call("POST", "/arm", self.hook_key, {})[0], 401)
+        self.assertEqual(self.call("POST", "/arm", self.hook_key, {"source": "glasses"})[0], 401)
 
     def test_revoked_device(self):
         R.save_devices(self.home, {})
