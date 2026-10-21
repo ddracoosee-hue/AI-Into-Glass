@@ -46,7 +46,7 @@ Claude Code is interrupted or the session ends. The request leaves the glasses a
 
 - File contents. `Write` and `Edit` send a path and a line count only.
 - Environment variables, and secret-shaped strings in commands (`sk-…`, `ghp_…`, `AKIA…`, `TOKEN=…`).
-  The hook replaces these with `‹secret›`.
+  The hook replaces these with `[secret]`.
 - Absolute paths under the home directory. These become `~/…`, or a path relative to `cwd`.
 
 ## On the wire (not stored)
