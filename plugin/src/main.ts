@@ -88,6 +88,11 @@ function frameFor(v: View): Frame {
       return {
         head: `${v.req.session.name} · ${v.req.tool}${more}`,
         clock: v.sending ? '…' : `${secs}s`,
+        // TODO(hardware): check how the G2 firmware wraps this. evenhub-simulator 0.9.5 wraps by
+        // character, so `rm -r build` broke as "rm -" / "r build", and the simulator says its font
+        // rendering may not match the glasses. If the firmware also wraps mid-token, pre-wrap at
+        // spaces with measureTextWrap from @evenrealities/pretext (inner width 568 px). Then retune
+        // the hook's SUMMARY_MAX (60) to what reads at a glance. Unverified: needs a G2.
         body: v.detail ? v.req.detail : v.req.summary,
         risk: v.req.risk === 'high' ? 'HIGH RISK' : v.req.risk,
         hint: v.sending ? 'sending…' : `tap: approve  ·  double-tap: deny  ·  swipe ${v.detail ? 'up: summary' : 'down: full'}`,
@@ -266,6 +271,12 @@ const input = createInput(screen, {
   foreground: entered => {
     foreground = entered
     // Back in front: anything shown before is stale. Ask the relay again now.
+    // TODO(hardware): confirm FOREGROUND_ENTER_EVENT arrives, including after a Bluetooth
+    // reconnect. evenhub-simulator 0.9.5 never emits lifecycle events ("Status Events: Not
+    // emitted"), so this path has only been checked by the unit test in test/input.test.ts. If
+    // it doesn't fire, polling stays stopped after FOREGROUND_EXIT_EVENT: the relay then sends
+    // prompts to the terminal (nothing polling for 10 s) and disarms after 60 s. That is safe, but
+    // the glasses keep showing stale state. Unverified: needs a G2.
     if (entered) void poll()
     else window.clearTimeout(pollTimer)
   },
