@@ -111,6 +111,7 @@ class Relay:
         self.private: dict[str, dict] = {}   # id -> nonce, deadline, finished (never sent to the hook)
         self.last_session = ""
         self.last_poll = float("-inf")  # monotonic time a device last polled /pending
+        self.stopping = threading.Event()
 
     @property
     def armed(self) -> bool:
@@ -212,6 +213,12 @@ class Relay:
                 return 409, {"error": f"already {req['status']}", "status": req["status"]}
             self._finish(rid, "approved" if decision == "approve" else "denied", decision, device)
             return 200, req
+
+    def start_sweeper(self, interval: float = 1.0) -> None:
+        def run() -> None:
+            while not self.stopping.wait(interval):
+                self.sweep()
+        threading.Thread(target=run, daemon=True).start()
 
     def sweep(self) -> None:
         """Expire stale requests, cancel everything on disarm or when no device is polling, forget old ones."""
@@ -360,12 +367,7 @@ def serve(args) -> None:
     url = f"http://{args.host}:{httpd.server_port}"
     (home / "relay.json").write_text(json.dumps({"url": url, "pid": os.getpid(), "version": VERSION}))
 
-    def sweep_forever() -> None:
-        while True:
-            time.sleep(1)
-            relay.sweep()
-
-    threading.Thread(target=sweep_forever, daemon=True).start()
+    relay.start_sweeper()
     append_log(home, "relay_start", url=url, version=VERSION)
     print(f"Approval Gate relay {VERSION} on {url}  (state: {home})", flush=True)
     print(f"Gate is {'ARMED' if relay.armed else 'disarmed'}. Ctrl+C stops the relay and disarms the gate.", flush=True)
@@ -374,6 +376,7 @@ def serve(args) -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        relay.stopping.set()
         httpd.server_close()
         set_armed(home, False, "relay", reason="relay stopped")
         (home / "relay.json").unlink(missing_ok=True)

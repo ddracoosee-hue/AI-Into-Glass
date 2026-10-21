@@ -130,14 +130,16 @@ class Files(unittest.TestCase):
         self.assertEqual(H.build_request(event), (None, "tool not handled"))
 
 
-class EndToEnd(unittest.TestCase):
-    """Runs the real hook script with `python -I` against a live relay."""
+class LiveRelay(unittest.TestCase):
+    """A live relay in a temp state dir, a paired device that has just polled, and the real hook script."""
+    presence = R.PRESENCE
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name)
         R.save_devices(self.home, {"dev_e2e": {"label": "t", "sha256": R.sha256(DEVICE_TOKEN), "created_at": R.now_iso()}})
-        self.httpd, self.relay = R.make_server(self.home, port=0, expiry={"low": 2, "medium": 2, "high": 2})
+        self.httpd, self.relay = R.make_server(self.home, port=0, expiry={"low": 2, "medium": 2, "high": 2},
+                                               presence=self.presence)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         self.base = f"http://127.0.0.1:{self.httpd.server_port}"
         (self.home / "relay.json").write_text(json.dumps({"url": self.base}))
@@ -145,9 +147,21 @@ class EndToEnd(unittest.TestCase):
         urllib.request.urlopen(urllib.request.Request(self.base + "/pending", headers={"Authorization": f"Bearer {DEVICE_TOKEN}"}))
 
     def tearDown(self):
+        self.relay.stopping.set()
         self.httpd.shutdown()
         self.httpd.server_close()
         self.tmp.cleanup()
+
+    def device_call(self, path, body=None):
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(self.base + path, data=data, method="POST" if data else "GET",
+                                     headers={"Authorization": f"Bearer {DEVICE_TOKEN}", "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req) as resp:
+                text = resp.read()
+                return resp.status, json.loads(text) if text else None
+        except urllib.error.HTTPError as err:
+            return err.code, json.loads(err.read())
 
     def run_hook(self, event, stdin=None):
         env = {**os.environ, "APPROVAL_GATE_HOME": str(self.home)}
@@ -173,6 +187,10 @@ class EndToEnd(unittest.TestCase):
         t = threading.Thread(target=run)
         t.start()
         return t
+
+
+class EndToEnd(LiveRelay):
+    """Runs the real hook script with `python -I` against a live relay."""
 
     def test_approve_prints_allow(self):
         t = self.phone("approve")
@@ -224,6 +242,38 @@ class EndToEnd(unittest.TestCase):
         self.assertIsNone(self.run_hook(bash("git push origin main")))
         t.join()
 
+
+class PresenceGap(LiveRelay):
+    """The phone's poll gap crosses the presence window while a prompt is on the glasses."""
+    presence = 1.5
+
+    def setUp(self):
+        super().setUp()
+        self.relay.start_sweeper(0.2)  # what serve() runs every second
+
+    def test_cancel_then_terminal_prompt_then_late_decision_rejected(self):
+        result = {}
+        hook = threading.Thread(target=lambda: result.update(out=self.run_hook(bash("git push origin main"))))
+        started = time.time()
+        hook.start()
+        for _ in range(50):  # the plugin polls once and puts the prompt on the glasses...
+            status, pending = self.device_call("/pending")
+            if status == 200:
+                break
+            time.sleep(0.05)
+        self.assertEqual(status, 200)
+        hook.join(15)  # ...then the phone goes quiet: screen off, WebView suspended
+
+        # 1. The relay cancels the request once nobody has polled for the presence window.
+        self.assertEqual(self.relay.requests[pending["id"]]["status"], "cancelled")
+        # 2. The hook prints nothing, so Claude Code shows its terminal prompt, long before the 45 s expiry.
+        self.assertIsNone(result["out"])
+        self.assertLess(time.time() - started, 8)
+        # 3. The phone wakes and the user taps approve on the stale prompt: rejected.
+        status, body = self.device_call(f"/requests/{pending['id']}/decide", {"decision": "approve", "nonce": pending["nonce"]})
+        self.assertEqual((status, body["status"]), (409, "cancelled"))
+        events = [json.loads(line)["event"] for line in (self.home / "gate.log").read_text(encoding="utf-8").splitlines()]
+        self.assertNotIn("approved", events)
 
 if __name__ == "__main__":
     unittest.main()
