@@ -35,6 +35,7 @@ MAX_BODY = 16 * 1024
 MAX_PENDING = 20
 KEEP_FINISHED = 600  # seconds a decided request stays answerable to a late /wait
 PRESENCE = 10  # seconds since a device last polled /pending before the gate stops accepting requests
+UNWATCHED_DISARM = 60  # seconds with no device polling before the relay disarms the gate itself
 WAIT_RE = re.compile(r"/requests/(req_[0-9A-Z]{26})/wait")
 DECIDE_RE = re.compile(r"/requests/(req_[0-9A-Z]{26})/decide")
 DEVICE_SOURCES = ("glasses", "phone")  # what a paired device may report; the PC logs "cli"/"hotkey", the relay "relay"
@@ -99,8 +100,9 @@ def save_devices(home: Path, devices: dict) -> None:
 
 
 class Relay:
-    def __init__(self, home: Path, expiry: dict[str, int] = EXPIRY, presence: float = PRESENCE):
-        self.home, self.expiry, self.presence = home, expiry, presence
+    def __init__(self, home: Path, expiry: dict[str, int] = EXPIRY, presence: float = PRESENCE,
+                 unwatched_disarm: float = UNWATCHED_DISARM):
+        self.home, self.expiry, self.presence, self.unwatched_disarm = home, expiry, presence, unwatched_disarm
         home.mkdir(parents=True, exist_ok=True)
         key_file = home / "hook.key"
         if not key_file.exists():
@@ -111,6 +113,7 @@ class Relay:
         self.private: dict[str, dict] = {}   # id -> nonce, deadline, finished (never sent to the hook)
         self.last_session = ""
         self.last_poll = float("-inf")  # monotonic time a device last polled /pending
+        self.started = time.monotonic()
         self.stopping = threading.Event()
 
     @property
@@ -221,9 +224,16 @@ class Relay:
         threading.Thread(target=run, daemon=True).start()
 
     def sweep(self) -> None:
-        """Expire stale requests, cancel everything on disarm or when no device is polling, forget old ones."""
+        """Expire stale requests, cancel everything on disarm or when no device is polling, forget old ones.
+
+        Also the backstop for a plugin that exits without disarming (crash, killed WebView, dead phone):
+        once nobody has polled for UNWATCHED_DISARM seconds the gate disarms, so the hook stops at its
+        armed-file check instead of asking the relay on every prompt."""
         with self.cond:
-            now, armed, watched = time.monotonic(), self.armed, self.watched
+            now = time.monotonic()
+            if self.armed and now - max(self.last_poll, self.started) > self.unwatched_disarm:
+                set_armed(self.home, False, "relay", reason=f"no device polled for {self.unwatched_disarm:g} s")
+            armed, watched = self.armed, self.watched
             for rid, req in list(self.requests.items()):
                 p = self.private[rid]
                 if req["status"] == "pending" and not (armed and watched):
@@ -353,8 +363,9 @@ class Server(ThreadingHTTPServer):
 
 
 def make_server(home: Path, host: str = "127.0.0.1", port: int = 8797, cors_origin: str = "*",
-                expiry: dict[str, int] = EXPIRY, presence: float = PRESENCE) -> tuple[Server, Relay]:
-    relay = Relay(home, expiry, presence)
+                expiry: dict[str, int] = EXPIRY, presence: float = PRESENCE,
+                unwatched_disarm: float = UNWATCHED_DISARM) -> tuple[Server, Relay]:
+    relay = Relay(home, expiry, presence, unwatched_disarm)
     handler = type("BoundHandler", (Handler,), {"relay": relay, "cors_origin": cors_origin})
     return Server((host, port), handler), relay
 

@@ -214,6 +214,12 @@ async function send(decision: 'approve' | 'deny'): Promise<void> {
   }
 }
 
+// Never leave the gate armed behind us, or the hook asks the relay on every prompt until the
+// relay's 60 s backstop disarms it. keepalive lets the request finish while the page is torn down.
+function disarmOnExit(reason: string): void {
+  if (client && latest?.armed !== false) client.setArmed(false, 'glasses', reason, true).catch(() => {})
+}
+
 async function setArmed(on: boolean, source: 'glasses' | 'phone'): Promise<void> {
   try {
     await client?.setArmed(on, source)
@@ -249,7 +255,10 @@ const input = createInput(screen, {
   deny: () => void send('deny'),
   arm: () => void setArmed(true, 'glasses'),
   disarm: () => void setArmed(false, 'glasses'),
-  exit: () => void bridge.shutDownPageContainer(1),
+  exit: () => {
+    disarmOnExit('plugin exit')
+    void bridge.shutDownPageContainer(1)
+  },
   retry: () => void poll(),
   swipe: down => {
     if (view.kind === 'prompt' && !view.sending && view.detail !== down) setView({ ...view, detail: down })
@@ -260,7 +269,10 @@ const input = createInput(screen, {
     if (entered) void poll()
     else window.clearTimeout(pollTimer)
   },
-  systemExit: () => unsubscribe(),
+  systemExit: abnormal => {
+    disarmOnExit(abnormal ? 'plugin exited abnormally' : 'plugin exit')
+    unsubscribe()
+  },
 }, {
   now,
   setTimeout: (fn, ms) => window.setTimeout(fn, ms),

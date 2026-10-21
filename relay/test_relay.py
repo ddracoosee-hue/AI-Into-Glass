@@ -24,12 +24,14 @@ def request_body(**over):
 class RelayTest(unittest.TestCase):
     expiry = R.EXPIRY
     presence = R.PRESENCE
+    unwatched_disarm = R.UNWATCHED_DISARM
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name)
         R.save_devices(self.home, {"dev_abc123": {"label": "test", "sha256": R.sha256(DEVICE_TOKEN), "created_at": R.now_iso()}})
-        self.httpd, self.relay = R.make_server(self.home, port=0, expiry=self.expiry, presence=self.presence)
+        self.httpd, self.relay = R.make_server(self.home, port=0, expiry=self.expiry, presence=self.presence,
+                                               unwatched_disarm=self.unwatched_disarm)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         self.base = f"http://127.0.0.1:{self.httpd.server_port}"
         self.hook_key = self.relay.hook_key
@@ -210,6 +212,26 @@ class Presence(RelayTest):
         self.relay.sweep()  # the serve loop runs this every second
         t.join(5)
         self.assertEqual(result["r"][1]["status"], "cancelled")
+
+
+class UnwatchedDisarm(RelayTest):
+    """The plugin went away without disarming: crashed, WebView killed, phone died."""
+    presence = 0.3
+    unwatched_disarm = 1
+
+    def test_relay_disarms_a_gate_nobody_watches(self):
+        time.sleep(1.2)
+        self.relay.sweep()
+        self.assertFalse((self.home / "armed").exists())
+        last = self.log_events()[-1]
+        self.assertEqual((last["event"], last["source"], last["reason"]), ("disarm", "relay", "no device polled for 1 s"))
+
+    def test_a_polling_device_keeps_it_armed(self):
+        for _ in range(6):
+            time.sleep(0.25)
+            self.call("GET", "/pending", DEVICE_TOKEN)
+            self.relay.sweep()
+        self.assertTrue((self.home / "armed").exists())
 
 
 class Auth(RelayTest):

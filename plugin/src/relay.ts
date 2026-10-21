@@ -39,7 +39,7 @@ function isPending(value: unknown): value is PendingRequest {
 export class RelayClient {
   constructor(readonly base: string, private readonly token: string) {}
 
-  private async call(method: 'GET' | 'POST', path: string, body?: object): Promise<Response> {
+  private async call(method: 'GET' | 'POST', path: string, body?: object, keepalive = false): Promise<Response> {
     const abort = new AbortController()
     const timer = setTimeout(() => abort.abort(), TIMEOUT_MS)
     try {
@@ -48,6 +48,7 @@ export class RelayClient {
         headers: { Authorization: `Bearer ${this.token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
         body: body ? JSON.stringify(body) : undefined,
         cache: 'no-store',
+        keepalive,
         signal: abort.signal,
       })
       if (res.status === 401) throw new AuthError('device token rejected')
@@ -78,9 +79,9 @@ export class RelayClient {
     throw new Error(`relay answered ${res.status}`)
   }
 
-  /** `source` lands in gate.log: which surface flipped the switch. */
-  async setArmed(on: boolean, source: 'glasses' | 'phone', reason?: string): Promise<boolean> {
-    const res = await this.call('POST', on ? '/arm' : '/disarm', { source, ...(reason ? { reason } : {}) })
+  /** `source` lands in gate.log: which surface flipped the switch. `keepalive` outlives the page. */
+  async setArmed(on: boolean, source: 'glasses' | 'phone', reason?: string, keepalive = false): Promise<boolean> {
+    const res = await this.call('POST', on ? '/arm' : '/disarm', { source, ...(reason ? { reason } : {}) }, keepalive)
     if (res.status !== 200) throw new Error(`relay answered ${res.status}`)
     return (await res.json()).armed === true
   }
