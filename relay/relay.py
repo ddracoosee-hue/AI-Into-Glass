@@ -5,7 +5,12 @@ The only process the phone talks to and the only thing that changes a request's
 status. Pending requests live in memory: a restart drops them, and every hook
 waiting on one falls back to the terminal prompt. Stdlib only.
 
-    python relay/relay.py                        # http://127.0.0.1:8797
+It also hosts the Command Deck: deck.py builds sessions, runs and to-dos from hook
+telemetry posted to a second, loopback-only listener (deck_api.IngestHandler, 8798),
+and deck_api.handle serves them to paired devices on this port.
+
+    python relay/relay.py                        # http://127.0.0.1:8797, ingest on 8798
+    python relay/relay.py --projects deck.projects.json
     python relay/gatectl.py pair --label pixel   # mint a device token
     python relay/gatectl.py disarm               # PC-side kill switch
 """
@@ -28,7 +33,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
-VERSION = "0.1.0"
+import deck_api
+from deck import Deck
+from projects import Projects
+
+VERSION = "0.2.0"
+CONTRACT = 2
 EXPIRY = {"low": 90, "medium": 90, "high": 45}  # seconds
 LIMITS = {"tool": 40, "summary": 60, "detail": 200, "agent": 40, "name": 40, "cwd": 200}
 MAX_BODY = 16 * 1024
@@ -40,10 +50,11 @@ WAIT_RE = re.compile(r"/requests/(req_[0-9A-Z]{26})/wait")
 DECIDE_RE = re.compile(r"/requests/(req_[0-9A-Z]{26})/decide")
 DEVICE_SOURCES = ("glasses", "phone")  # what a paired device may report; the PC logs "cli"/"hotkey", the relay "relay"
 CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+REFUSALS = ("no device", "outside focus", "muted")  # each sends the hook back to the terminal prompt
 CORS = {
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Authorization, Content-Type",
-    "Access-Control-Expose-Headers": "X-Gate-Armed, X-Gate-Waiting, X-Gate-Session",
+    "Access-Control-Expose-Headers": "X-Gate-Armed, X-Gate-Waiting, X-Gate-Session, X-Deck-Cursor",
     "Access-Control-Allow-Private-Network": "true",
     "Access-Control-Max-Age": "600",
 }
@@ -101,13 +112,19 @@ def save_devices(home: Path, devices: dict) -> None:
 
 class Relay:
     def __init__(self, home: Path, expiry: dict[str, int] = EXPIRY, presence: float = PRESENCE,
-                 unwatched_disarm: float = UNWATCHED_DISARM):
+                 unwatched_disarm: float = UNWATCHED_DISARM, deck: Deck | None = None):
         self.home, self.expiry, self.presence, self.unwatched_disarm = home, expiry, presence, unwatched_disarm
         home.mkdir(parents=True, exist_ok=True)
         key_file = home / "hook.key"
         if not key_file.exists():
             key_file.write_text(secrets.token_urlsafe(32))
         self.hook_key = key_file.read_text().strip()
+        # Telemetry hooks get their own key: it can post to ingest and nothing else.
+        ingest_file = home / "ingest.key"
+        if not ingest_file.exists():
+            ingest_file.write_text(f"dik_{secrets.token_urlsafe(32)}")
+        self.ingest_key = ingest_file.read_text().strip()
+        self.deck = deck
         self.cond = threading.Condition()
         self.requests: dict[str, dict] = {}  # id -> contract shape, insertion = age order
         self.private: dict[str, dict] = {}   # id -> nonce, deadline, finished (never sent to the hook)
@@ -152,8 +169,11 @@ class Relay:
         if fields["risk"] not in self.expiry:
             return "risk must be low, medium or high"
         with self.cond:
-            if not self.watched:
-                return "no device listening"
+            refusal = "no device listening" if not self.watched else self.deck.gate_route(session, fields["tool"]) if self.deck else None
+            if refusal:
+                if self.deck:
+                    self.deck.gate_refused(body, refusal)
+                return refusal
             if sum(r["status"] == "pending" for r in self.requests.values()) >= MAX_PENDING:
                 return "too many pending requests"
             ttl = self.expiry[fields["risk"]]
@@ -165,6 +185,8 @@ class Relay:
             self.private[req["id"]] = {"nonce": secrets.token_urlsafe(16), "deadline": time.monotonic() + ttl, "finished": 0.0}
             self.last_session = session["name"]
             self.log("request", req)
+            if self.deck:
+                self.deck.gate_opened(req)
             self.cond.notify_all()
             return req
 
@@ -173,6 +195,8 @@ class Relay:
         req.update(status=status, decision=decision, decided_by=device, decided_at=now_iso() if decision else None)
         self.private[rid]["finished"] = time.monotonic()
         self.log(status, req)
+        if self.deck:
+            self.deck.gate_closed(req)
         self.cond.notify_all()
 
     def wait(self, rid: str, client_gone) -> dict | None:
@@ -249,6 +273,13 @@ class Relay:
                     self._finish(rid, "timeout")
                 elif req["status"] != "pending" and now - p["finished"] > KEEP_FINISHED:
                     del self.requests[rid], self.private[rid]
+        if self.deck:
+            self.deck.sweep(self.armed)
+
+    def touch(self) -> None:
+        """A paired device is watching (it polled /pending or is waiting on /events)."""
+        with self.cond:
+            self.last_poll = time.monotonic()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -305,10 +336,11 @@ class Handler(BaseHTTPRequestHandler):
         self.reply(204)
 
     def do_GET(self) -> None:
-        path = urlparse(self.path).path
+        url = urlparse(self.path)
+        path = url.path
         if path == "/health":
             who = "hook" if self.is_hook() else "device" if self.device() else None
-            return self.reply(200, {"ok": True, "version": VERSION, "armed": self.relay.armed, "auth": who})
+            return self.reply(200, {"ok": True, "version": VERSION, "armed": self.relay.armed, "auth": who, "contract": CONTRACT})
         if path == "/pending":
             if not self.device():
                 return self.reply(401, {"error": "unauthorized"})
@@ -321,10 +353,25 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(401, {"error": "unauthorized"})
             req = self.relay.wait(m[1], self.client_gone)
             return self.reply(200, req) if req else self.reply(404, {"error": "unknown request"})
+        if self.relay.deck and deck_api.handle(self, "GET", path, url.query):
+            return
         self.reply(404, {"error": "not found"})
 
+    def do_PUT(self) -> None:
+        url = urlparse(self.path)
+        if not (self.relay.deck and deck_api.handle(self, "PUT", url.path, url.query)):
+            self.reply(404, {"error": "not found"})
+
+    def do_DELETE(self) -> None:
+        url = urlparse(self.path)
+        if not (self.relay.deck and deck_api.handle(self, "DELETE", url.path, url.query)):
+            self.reply(404, {"error": "not found"})
+
     def do_POST(self) -> None:
-        path = urlparse(self.path).path
+        url = urlparse(self.path)
+        path = url.path
+        if self.relay.deck and path.startswith("/todos/"):
+            return None if deck_api.handle(self, "POST", path, url.query) else self.reply(404, {"error": "not found"})
         body = self.read_json()
         if path == "/requests":
             if not self.is_hook():
@@ -335,7 +382,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(409, {"error": "disarmed"})
             req = self.relay.create(body)
             if isinstance(req, str):
-                code = 429 if req.startswith("too many") else 409 if req.startswith("no device") else 400
+                code = 429 if req.startswith("too many") else 409 if req.startswith(REFUSALS) else 400
                 return self.reply(code, {"error": req})
             return self.reply(201, {"id": req["id"], "expires_at": req["expires_at"]})
         device = self.device()
@@ -371,23 +418,42 @@ class Server(ThreadingHTTPServer):
 
 def make_server(home: Path, host: str = "127.0.0.1", port: int = 8797, cors_origin: str = "*",
                 expiry: dict[str, int] = EXPIRY, presence: float = PRESENCE,
-                unwatched_disarm: float = UNWATCHED_DISARM) -> tuple[Server, Relay]:
-    relay = Relay(home, expiry, presence, unwatched_disarm)
+                unwatched_disarm: float = UNWATCHED_DISARM, projects: Path | None = None,
+                user_home: str | None = None, clock=time.time) -> tuple[Server, Relay]:
+    """The phone API. `projects` is deck.projects.json (default: the state dir's own)."""
+    home.mkdir(parents=True, exist_ok=True)
+    deck = Deck(home, Projects(projects or home / "deck.projects.json"), user_home, clock)
+    relay = Relay(home, expiry, presence, unwatched_disarm, deck)
     handler = type("BoundHandler", (Handler,), {"relay": relay, "cors_origin": cors_origin})
     return Server((host, port), handler), relay
+
+
+def make_ingest_server(relay: Relay, port: int = 8798) -> Server:
+    """Loopback only, always: `tailscale serve` publishes 8797, so ingest lives on its own port."""
+    handler = type("BoundIngest", (deck_api.IngestHandler,), {"deck": relay.deck, "key": relay.ingest_key})
+    return Server(("127.0.0.1", port), handler)
 
 
 def serve(args) -> None:
     if args.host in ("0.0.0.0", "::", ""):
         sys.exit("Refusing to bind every interface. Use 127.0.0.1 (with `tailscale serve`) or your tailnet IP.")
     home = state_dir()
-    httpd, relay = make_server(home, args.host, args.port, args.cors_origin)
+    projects = Path(args.projects) if args.projects else None
+    httpd, relay = make_server(home, args.host, args.port, args.cors_origin, projects=projects)
+    ingest = make_ingest_server(relay, args.ingest_port)
     url = f"http://{args.host}:{httpd.server_port}"
-    (home / "relay.json").write_text(json.dumps({"url": url, "pid": os.getpid(), "version": VERSION}))
+    ingest_url = f"http://127.0.0.1:{ingest.server_port}/ingest"
+    (home / "relay.json").write_text(json.dumps({"url": url, "ingest_url": ingest_url, "pid": os.getpid(), "version": VERSION}))
 
     relay.start_sweeper()
+    threading.Thread(target=ingest.serve_forever, kwargs={"poll_interval": 0.5}, daemon=True).start()
     append_log(home, "relay_start", url=url, version=VERSION)
     print(f"Approval Gate relay {VERSION} on {url}  (state: {home})", flush=True)
+    print(f"Command Deck ingest on {ingest_url} (loopback only; never add it to tailscale serve)", flush=True)
+    if relay.deck.projects.error:
+        print(f"Projects config not loaded: {relay.deck.projects.error}", flush=True)
+    else:
+        print(f"Projects: {', '.join(relay.deck.projects.projects) or 'none configured'}", flush=True)
     print(f"Gate is {'ARMED' if relay.armed else 'disarmed'}. Ctrl+C stops the relay and disarms the gate.", flush=True)
     try:
         httpd.serve_forever(poll_interval=0.5)
@@ -395,6 +461,8 @@ def serve(args) -> None:
         pass
     finally:
         relay.stopping.set()
+        ingest.shutdown()
+        ingest.server_close()
         httpd.server_close()
         set_armed(home, False, "relay", reason="relay stopped")
         (home / "relay.json").unlink(missing_ok=True)
@@ -406,6 +474,8 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8797)
     parser.add_argument("--cors-origin", default="*", help="Access-Control-Allow-Origin (auth is a bearer token, never a cookie)")
+    parser.add_argument("--ingest-port", type=int, default=8798, help="Command Deck telemetry, 127.0.0.1 only")
+    parser.add_argument("--projects", help="deck.projects.json (default: the one in the state dir)")
     serve(parser.parse_args())
 
 
