@@ -1,0 +1,39 @@
+1
+00:00:00,000 --> 00:00:06,000
+Three AI agents. Two projects. One glance.
+
+2
+00:00:06,000 --> 00:00:16,183
+What's running, where, for how long.
+
+3
+00:00:16,183 --> 00:00:24,287
+Failures surface on their own.
+
+4
+00:00:24,287 --> 00:00:33,888
+Every project is its own deck.
+
+5
+00:00:33,888 --> 00:00:45,640
+In focus, nothing else can interrupt.
+
+6
+00:00:45,640 --> 00:00:55,245
+Prompts cut through any screen. One tap.
+
+7
+00:00:55,245 --> 00:01:03,335
+Two taps to say no.
+
+8
+00:01:03,335 --> 00:01:13,332
+Real files. Real changes.
+
+9
+00:01:13,332 --> 00:01:22,084
+A work session, run from the glasses.
+
+10
+00:01:22,084 --> 00:01:30,084
+Command Deck · built on Even Hub · open source
