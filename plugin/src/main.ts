@@ -17,6 +17,7 @@ const KEY_TOKEN = 'gate.token'
 const KEY_TRANSITIONS = 'deck.transitions'
 const KEY_SEEN = 'deck.seen-errors' // failures already opened on the glasses
 const KEY_LOOKED = 'deck.looked' // {cursor, at}: the event log position at the last view
+const KEY_TODO_TOP = 'deck.todo-top' // "Move to top": to-do ids, newest first. Order only; files never change
 
 const bridge = await waitForEvenAppBridge()
 const now = () => performance.now()
@@ -75,6 +76,12 @@ try {
 } catch {
   looked = null
 }
+let todoTop: string[] = []
+try {
+  todoTop = JSON.parse((await load(KEY_TODO_TOP)) || '[]')
+} catch {
+  todoTop = []
+}
 let sinceShown = false
 console.debug('[deck] looked', looked ? looked.cursor : 'never')
 
@@ -109,7 +116,7 @@ function dataFor(page: Page): Data {
   const spotlight = page.kind === 'deck' ? (own?.deck ?? rootDeck)?.errors.find(e => !seenErrors.includes(e.error ?? e.id ?? '')) : undefined
   const spotId = spotlight ? spotlight.error ?? spotlight.id : undefined
   if (spotlight && spotId !== lastSpotlight) console.log('[deck] spotlight', (lastSpotlight = spotId), spotlight.detail)
-  return { armed: latest?.armed ?? false, clock: clock(), rootDeck, ...own, spotlight, runAge: own ? (now() - own.at) / 1000 : 0 }
+  return { armed: latest?.armed ?? false, clock: clock(), rootDeck, ...own, spotlight, todoTop, runAge: own ? (now() - own.at) / 1000 : 0 }
 }
 
 let lastSpotlight: string | undefined
@@ -256,7 +263,14 @@ async function fetchPage(page: Page): Promise<void> {
     case 'todos': got = { todos: await c.todos(page.scope) }; break
     case 'session': got = { session: await c.session(id) }; break
     case 'run': got = { run: await c.run(id) }; break
-    case 'todo': got = { todo: (await c.todos(page.scope)).items.find(t => t.id === id) }; break
+    case 'todo': {
+      // Keep the last copy when the line changes on disk: the tap then still asks the relay, which
+      // answers 409, and the screen says so. The glasses never guess that a file changed.
+      const fresh = (await c.todos(page.scope)).items.find(t => t.id === id)
+      const prev = cache.get(key)
+      got = { todo: fresh ?? prev?.todo, todoOutcome: prev?.todoOutcome }
+      break
+    }
     case 'card': got = { need: (await c.needs('all')).items.find(n => n.kind === 'card' && n.id === id) }; break
     case 'commits': got = { project: await c.project(page.scope) }; break
     case 'error': {
@@ -402,7 +416,14 @@ async function act(action: Action | undefined): Promise<void> {
     case 'todo-done': {
       const outcome = await client.todoDone(action.id).catch(() => 'failed' as const)
       console.log('[deck] todo', action.id, outcome)
-      cache.delete(pageKey(top()))
+      const page = top()
+      const entry = cache.get(pageKey(page))
+      if (page.kind === 'todo' && entry?.todo) {
+        cache.set(pageKey(page), { ...entry, todo: { ...entry.todo, done: outcome === 'done' || entry.todo.done }, todoOutcome: outcome })
+        render()
+        if (outcome === 'done') window.setTimeout(() => top() === page && pop(), 1200) // DONE, then back to the list
+        return
+      }
       return void poll()
     }
     case 'focus-start': return push({ kind: 'focus', scope: 'all', label: 'FOCUS' })
@@ -414,6 +435,10 @@ async function act(action: Action | undefined): Promise<void> {
       if (top().kind === 'session' && top().id === action.session) return pop()
       return void poll()
     case 'back': return pop()
+    case 'todo-top':
+      todoTop = [action.id, ...todoTop.filter(t => t !== action.id)].slice(0, 50)
+      void store(KEY_TODO_TOP, JSON.stringify(todoTop))
+      return render()
     case 'phone': case 'none':
       console.log('[deck] action not built yet:', action.do)
   }

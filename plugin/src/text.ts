@@ -56,7 +56,7 @@ export function columns(cols: { text: string; x: number }[], limit: number, righ
     line = lead + text
     pen = width(line)
   })
-  if (tail) line += pad(line ? pen : 0, tailX, true) + tail
+  if (tail) line += gap(line, tail, right!.edge) + tail
   return line
 }
 
@@ -64,10 +64,16 @@ export function columns(cols: { text: string; x: number }[], limit: number, righ
  * (the breadcrumb) keeps at least 160 px. */
 export function bar(left: string, right: string, px: number): string {
   const r = fit(right, px - Math.min(width(left), 160) - SPACE * 3)
-  let budget = px - width(r) - SPACE * 3
-  let l = fit(left, budget)
-  while (l && width(l + pad(width(l), px - width(r), true) + r) > px) l = fit(left, (budget -= 2))
-  return l + pad(width(l), px - width(r), true) + r
+  const l = fit(left, px - width(r) - SPACE * 3)
+  return l + gap(l, r, px) + r
+}
+
+/** The spaces between `l` and a right-aligned `r` so the line ends at, never past, `px`. Measured
+ * joined, since kerning across the join can add a pixel; a space comes out, never a letter. */
+function gap(l: string, r: string, px: number): string {
+  let spaces = Math.max(1, Math.floor((px - width(l) - width(r)) / SPACE))
+  while (spaces > 1 && width(l + ' '.repeat(spaces) + r) > px) spaces--
+  return ' '.repeat(spaces)
 }
 
 /** A duration for rows (whole minutes: 0m, 12m, 3h, 2d) or, `precise`, for live counters (0:42, 1:02:05). */

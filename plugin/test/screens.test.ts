@@ -6,7 +6,7 @@ import {
   barText, DECK_MENU, listScreen, detailScreen, MAX_ROWS, ROW_W, rowText, screenFor, VISIBLE_ROWS, windowFor,
   type Data, type Page,
 } from '../src/screens.ts'
-import { ago, fit, width } from '../src/text.ts'
+import { ago, bar, fit, width } from '../src/text.ts'
 import type { DeckCounts, Run, Session, Todo } from '../src/deck-api.ts'
 
 const page = (kind: Page['kind'], scope = 'all', id?: string, label?: string): Page => ({ kind, scope, id, label, cursor: 0, top: 0 })
@@ -90,6 +90,14 @@ test('windowFor keeps the cursor on screen', () => {
   assert.equal(windowFor(VISIBLE_ROWS, 0, 12), 1)
   assert.equal(windowFor(2, 4, 12), 2)
   assert.equal(windowFor(11, 7, 12), 7)
+})
+
+test('a short breadcrumb is never cut to make room for a short status', () => {
+  for (const [left, right] of [['TO-DOS › TO-DO', 'OFF · 11:56'], ['glasses › SESSIONS', 'OFF · 11:23'], ['DECK', 'ARMED · 14:02']]) {
+    const line = bar(left, right, ROW_W)
+    assert.ok(line.startsWith(`${left} `) && line.endsWith(` ${right}`), line)
+    assert.ok(width(line) <= ROW_W, line)
+  }
 })
 
 test('fit cuts by pixels and ago formats durations', () => {

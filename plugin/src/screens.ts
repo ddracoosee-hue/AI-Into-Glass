@@ -26,7 +26,7 @@ export type Action =
   | { do: 'todo-done'; id: string }
   | { do: 'arm-toggle' } | { do: 'focus-start' } | { do: 'focus-end' } | { do: 'transitions' }
   | { do: 'focus-project'; project: string } | { do: 'mute'; session: string } | { do: 'phone'; page: Omit<Page, 'cursor' | 'top'> }
-  | { do: 'back' } | { do: 'none' }
+  | { do: 'todo-top'; id: string } | { do: 'back' } | { do: 'none' }
 
 export interface Row {
   key: string
@@ -101,6 +101,10 @@ export interface Data {
   spotlight?: DeckError
   /** What happened while nobody looked: the relay's events since the last view. */
   since?: { events: DeckEvent[]; away_s: number }
+  /** The relay's answer to the last "done" on this to-do. */
+  todoOutcome?: 'done' | 'changed' | 'failed'
+  /** To-do ids moved to the top on the glasses, newest first. */
+  todoTop?: string[]
 }
 
 const open = (kind: PageKind, scope: string, id?: string, label?: string): Action => ({ do: 'open', page: { kind, scope, id, label } })
@@ -149,7 +153,7 @@ export function projectMenu(p: { id: string }): Menu {
 export function todoMenu(t: { id: string; project: string }): Menu {
   return [
     { id: 40, name: 'Mark done', action: { do: 'todo-done', id: t.id } },
-    { id: 41, name: 'Move to top', action: { do: 'none' } },
+    { id: 41, name: 'Move to top', action: { do: 'todo-top', id: t.id } },
     { id: 42, name: 'Open on phone', action: phone('todo', t.project, t.id) },
   ]
 }
@@ -297,7 +301,10 @@ export function listScreen(stack: Page[], d: Data): ListScreen {
         empty: d.projects ? 'No projects configured.' : 'Loading…' }
     }
     case 'todos': {
-      const rows = capped((d.todos?.items ?? []).map(todoRow), d.todos?.more ?? 0, 'to-dos')
+      const top = d.todoTop ?? []
+      const rank = (t: Todo) => (top.includes(t.id) ? top.indexOf(t.id) : top.length)
+      const items = [...(d.todos?.items ?? [])].sort((a, b) => rank(a) - rank(b)) // stable: file order otherwise
+      const rows = capped(items.map(todoRow), d.todos?.more ?? 0, 'to-dos')
       const open_ = d.todos ? d.todos.items.length + d.todos.more : 0
       const labelled = { ...base, crumb: crumb([...stack.slice(0, -1), { ...page, label: `TO-DOS · ${open_} open` }]) }
       return { ...labelled, rows, hint: 'tap open · 2× back · hold actions', menu: listMenu(rows, [{ id: 42, name: 'Open on phone', action: phone('todos', page.scope) }]),
@@ -347,7 +354,12 @@ export function detailScreen(stack: Page[], d: Data): DetailScreen {
       const t = d.todo
       if (!t) return { ...base, headline: 'Loading…', body: '', hint: '2× back', menu: [] }
       const writable = t.source !== 'claude-task'
-      return { ...base, headline: t.done ? 'DONE' : t.text, body: [kv('Project', t.project_name), kv('From', t.source === 'claude-task' ? 'Claude Code task list' : t.file ?? '')].join('\n'),
+      if (d.todoOutcome === 'changed' || d.todoOutcome === 'failed') {
+        return { ...base, headline: d.todoOutcome === 'changed' ? 'CHANGED ON DISK · not marked' : 'NOT SENT · check the relay',
+          body: [kv('Line', t.text), kv('File', t.file ?? ''), d.todoOutcome === 'changed' ? 'The line was edited or moved since it was read.' : ''].filter(Boolean).join('\n'),
+          hint: '2× back', menu: todoMenu(t) }
+      }
+      return { ...base, headline: t.done ? `DONE · ${t.text}` : t.text, body: [kv('Project', t.project_name), kv('From', t.source === 'claude-task' ? 'Claude Code task list' : t.file ?? '')].join('\n'),
         hint: t.done ? '2× back' : writable ? 'tap done · 2× back · hold actions' : 'done in Claude Code · 2× back',
         menu: todoMenu(t), primary: !t.done && writable ? { do: 'todo-done', id: t.id } : undefined }
     }
