@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>TODO.md</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #1e1e1e; color: #d4d4d4; overflow: hidden; }
+  body { display: grid; grid-template-rows: 40px 1fr; font: 22px/1.6 "Cascadia Mono", Consolas, monospace; }
+  header { display: flex; align-items: center; padding: 0 16px; background: #252526; border-bottom: 1px solid #333;
+    font: 15px "Segoe UI", system-ui, sans-serif; color: #cccccc; }
+  header b { font-weight: 600; }
+  ol { margin: 0; padding: 16px 0; list-style: none; counter-reset: n; }
+  li { counter-increment: n; display: grid; grid-template-columns: 56px 1fr; padding: 0 16px 0 0; transition: background 0.6s; }
+  li::before { content: counter(n); color: #858585; text-align: right; padding-right: 20px; }
+  .done { color: #6a9955; }
+  .h { color: #569cd6; font-weight: 600; }
+  .flash { background: #264f78; }
+</style>
+</head>
+<body>
+<header><b id="name"></b></header>
+<ol id="lines"></ol>
+<script>
+  const box = document.getElementById('lines')
+  let prev = null
+  async function tick() {
+    try {
+      const s = await (await fetch('/todo.json', { cache: 'no-store' })).json()
+      document.getElementById('name').textContent = s.name
+      if (prev === null || s.lines.join('\n') !== prev.join('\n')) {
+        box.replaceChildren(...s.lines.map((line, i) => {
+          const li = document.createElement('li')
+          li.textContent = line || ' '
+          if (/^#/.test(line)) li.className = 'h'
+          if (/\[x\]/i.test(line)) li.classList.add('done')
+          if (prev && prev[i] !== undefined && prev[i] !== line) li.classList.add('flash')
+          return li
+        }))
+        prev = s.lines
+      }
+    } catch {}
+    setTimeout(tick, 120)
+  }
+  tick()
+</script>
+</body>
+</html>
