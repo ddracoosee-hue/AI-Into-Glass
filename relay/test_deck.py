@@ -177,7 +177,7 @@ class Scrubbing(DeckTest):
         self.assertEqual(self.deck.scrub.text("sed s/a/b/ f && echo a/b/c", place), "sed s/a/b/ f && echo a/b/c")
 
 
-class Http(unittest.TestCase):
+class HttpBase(unittest.TestCase):
     """The relay as it runs: phone API, ingest listener, fixtures posted over HTTP."""
     root = r"C:\Users\demo\dev\rec"
 
@@ -216,6 +216,9 @@ class Http(unittest.TestCase):
         status, body = self.call("GET", self.base + path, token)
         return status, (json.loads(body) if body else None)
 
+
+
+class Http(HttpBase):
     def test_ingest_always_answers_an_empty_200(self):
         started = time.monotonic()
         for event in fixtures("claude-code", (REC, self.root)):
@@ -300,6 +303,38 @@ class Http(unittest.TestCase):
         self.assertIn("Build done: dist/app.zip", json.dumps(bodies["/needs"]))
         self.assertIn("type notes.txt && ls src x.log y TOKEN=[secret]", json.dumps(bodies["/runs"]))
         self.assertEqual(bodies["/needs"]["items"][0]["kind"], "approval")
+
+
+class Mute(HttpBase):
+    def test_a_muted_session_is_hidden_and_its_approvals_go_to_the_terminal(self):
+        events = fixtures("claude-code", (REC, self.root))
+        perm = next(i for i, e in enumerate(events) if e["hook_event_name"] == "PermissionRequest")
+        for event in events[:perm + 1]:
+            self.post("claude-code", event)
+        self.assertEqual(self.get("/needs")[1]["items"][0]["kind"], "session")
+        status, body = self.call("POST", f"{self.base}/sessions/{CC_SESSION}/mute", DEVICE_TOKEN, {"muted": True})
+        self.assertEqual((status, json.loads(body)["muted"]), (200, True))
+        self.assertEqual(self.get("/needs")[1]["items"], [])
+        self.assertEqual(self.get("/runs?active=1")[1]["items"], [])
+        R.set_armed(self.home, True, "cli")
+        self.call("GET", self.base + "/pending", DEVICE_TOKEN)
+        status, body = self.call("POST", self.base + "/requests", self.relay.hook_key,
+                                 {"session": {"agent": "claude-code", "name": "rec", "cwd": "~/dev/rec"}, "tool": "Bash",
+                                  "summary": "git push origin main", "detail": "git push origin main", "risk": "high"})
+        self.assertEqual((status, json.loads(body)["error"]), (409, "muted"))
+        self.assertEqual(self.call("POST", f"{self.base}/sessions/{CC_SESSION}/mute", self.relay.hook_key, {"muted": False})[0], 401)
+        self.assertEqual(self.call("POST", f"{self.base}/sessions/{CC_SESSION}/mute", DEVICE_TOKEN, {"muted": "no"})[0], 400)
+        self.call("POST", f"{self.base}/sessions/{CC_SESSION}/mute", DEVICE_TOKEN, {"muted": False})
+        self.assertEqual(self.get("/needs")[1]["items"][0]["kind"], "session")
+
+    def test_current_names_its_run(self):
+        events = fixtures("claude-code", (REC, self.root))
+        perm = next(i for i, e in enumerate(events) if e["hook_event_name"] == "PermissionRequest")
+        for event in events[:perm + 1]:
+            self.post("claude-code", event)
+        _, sess = self.get(f"/sessions/{CC_SESSION}")
+        _, run = self.get(f"/runs/{sess['current']['run']}")
+        self.assertEqual((run["target"], run["status"]), ("git push origin main", "waiting"))
 
 
 class Upkeep(DeckTest):

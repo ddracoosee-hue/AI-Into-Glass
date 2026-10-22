@@ -93,6 +93,13 @@ def handle(h, method: str, path: str, query: str) -> bool:
     elif route == ("GET", "sessions", 2):
         found = deck.session_detail(parts[1])
         h.reply(200, found) if found else h.reply(404, {"error": "unknown session"})
+    elif route == ("POST", "sessions", 3) and parts[2] == "mute":
+        body = h.read_json() or {}
+        if not isinstance(body.get("muted"), bool):
+            h.reply(400, {"error": "muted must be true or false"})
+            return True
+        found = deck.mute(parts[1], body["muted"])
+        h.reply(200, found) if found else h.reply(404, {"error": "unknown session"})
     elif route == ("GET", "runs", 2):
         found = deck.run_detail(parts[1])
         h.reply(200, found) if found else h.reply(404, {"error": "unknown run"})

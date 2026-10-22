@@ -370,7 +370,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         url = urlparse(self.path)
         path = url.path
-        if self.relay.deck and path.startswith("/todos/"):
+        if self.relay.deck and path.startswith(("/todos/", "/sessions/")):
             return None if deck_api.handle(self, "POST", path, url.query) else self.reply(404, {"error": "not found"})
         body = self.read_json()
         if path == "/requests":

@@ -315,7 +315,7 @@ class Deck:
                "parent": parent, "_t": t, "_end": None}
         self.runs[rid] = run
         sess["counts"]["tools"] += kind == "tool"
-        sess["current"] = {"tool": tool, "target": target, "since": iso(t)}
+        sess["current"] = {"tool": tool, "target": target, "since": iso(t), "run": rid}
         self.emit("run", run=rid, session=sess["id"], agent=sess["agent"], project=sess["project"], kind=kind,
                   tool=tool, target=target, status="running")
         return run
@@ -352,7 +352,7 @@ class Deck:
             run["status"] = "running"  # the terminal approved it after all
         if run:
             self._close(run, status, t)
-            sess["current"] = None if sess["current"] and sess["current"]["since"] == run["started_at"] else sess["current"]
+            sess["current"] = None if sess["current"] and sess["current"].get("run") == run["id"] else sess["current"]
         self._settle(sess)
         return run
 
@@ -391,7 +391,7 @@ class Deck:
             run = self._open(sess, f"perm_{self.seq + 1}", "tool", tool, target, t)
             run["_ctx"] = safe_id(event.get("agent_id"), "a")
         run["status"] = "waiting"
-        sess["current"] = {"tool": tool, "target": run["target"], "since": iso(t)}
+        sess["current"] = {"tool": tool, "target": run["target"], "since": iso(t), "run": run["id"]}
         self.sp[sess["id"]]["perm_t"] = t
         self._state(sess, "waiting", "approval")
         for rid, g in self.gate.items():  # the gate's own request may have arrived first
@@ -481,6 +481,19 @@ class Deck:
                 self._close(run, "ended", t)
         sess["current"] = None
         self._state(sess, "ended")
+
+    def mute(self, sid: str, muted: bool) -> dict | None:
+        """Hide a session from the glasses. Its approvals then go straight to the terminal; muting
+        never approves anything."""
+        with self.cond:
+            sess = self.sessions.get(sid)
+            if not sess:
+                return None
+            if sess["muted"] != muted:
+                sess["muted"] = muted
+                self.emit("session", session=sid, agent=sess["agent"], project=sess["project"], state=sess["state"],
+                          waiting_for=sess["waiting_for"], muted=muted)
+            return self.public_session(sess)
 
     # ---- cards --------------------------------------------------------------------
 
