@@ -443,6 +443,100 @@ class Placement(unittest.TestCase):
         self.assertEqual((deck.session_list("all"), deck.deck("all")["projects"]), ([], 2))
 
 
+class Todos(unittest.TestCase):
+    """To-dos from configured files: read, then flip exactly one line, or refuse and change nothing."""
+    BODY = "# TODO\r\n\r\n- [ ] README threat model\r\n- [ ] record demo\r\n- [x] ship v1\r\n  * [ ] nested item\r\n- [ ] record demo\r\nnot a task\r\n"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        self.root, self.vault = self.dir / "glasses", self.dir / "vault"
+        (self.vault / "Projects").mkdir(parents=True)
+        self.root.mkdir()
+        (self.root / "TODO.md").write_bytes(self.BODY.encode())
+        (self.vault / "Projects" / "Glasses.md").write_text("- [ ] from obsidian\n")
+        (self.dir / "secret.md").write_text("- [ ] outside the project\n")
+        config = self.dir / "deck.projects.json"
+        config.write_text(json.dumps({"obsidian_vault": self.vault.as_posix(), "projects": [
+            {"id": "glasses", "name": "glasses", "root": self.root.as_posix(), "todos": ["TODO.md", "obsidian:Projects/Glasses.md", "../secret.md"]}]}))
+        self.deck = D.Deck(self.dir, P.Projects(config), FAKE_HOME)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def open_todos(self):
+        return {t["text"]: t for t in self.deck.todo_list("all")}
+
+    def test_reads_open_lines_from_configured_files_only(self):
+        todos = self.deck.todo_list("all")
+        self.assertEqual([(t["text"], t["source"], t["file"]) for t in todos], [
+            ("README threat model", "todo-file", "TODO.md"), ("record demo", "todo-file", "TODO.md"), ("nested item", "todo-file", "TODO.md"),
+            ("record demo", "todo-file", "TODO.md"), ("from obsidian", "obsidian", "Projects/Glasses.md")])
+        self.assertEqual(len({t["id"] for t in todos}), 5)  # the duplicate line gets its own id
+        self.assertNotIn("outside the project", json.dumps(todos))
+
+    def test_done_flips_exactly_one_line_atomically(self):
+        target = self.open_todos()["README threat model"]
+        done = self.deck.mark_todo(target["id"])
+        self.assertEqual((done["text"], done["done"]), ("README threat model", True))
+        after = (self.root / "TODO.md").read_bytes().decode()
+        self.assertEqual(after, self.BODY.replace("- [ ] README threat model", "- [x] README threat model"))
+        self.assertEqual([p.name for p in self.root.iterdir()], ["TODO.md"])  # no temp file left behind
+        self.assertIsNone(self.deck.mark_todo(target["id"]))  # already done: 409
+        self.assertEqual([e["status"] for e in self.deck.events if e["type"] == "todo"], ["done"])
+
+    def test_the_second_duplicate_is_its_own_line(self):
+        second = [t for t in self.deck.todo_list("all") if t["text"] == "record demo"][1]
+        self.deck.mark_todo(second["id"])
+        lines = (self.root / "TODO.md").read_text().splitlines()
+        self.assertEqual([l for l in lines if "record demo" in l], ["- [ ] record demo", "- [x] record demo"])
+
+    def test_an_edited_line_is_refused_and_nothing_changes(self):
+        target = self.open_todos()["README threat model"]
+        edited = self.BODY.replace("README threat model", "README threat model, v2")
+        (self.root / "TODO.md").write_bytes(edited.encode())
+        self.assertIsNone(self.deck.mark_todo(target["id"]))
+        self.assertEqual((self.root / "TODO.md").read_bytes().decode(), edited)
+
+    def test_obsidian_notes_and_claude_tasks(self):
+        note = self.open_todos()["from obsidian"]
+        self.assertTrue(self.deck.mark_todo(note["id"]))
+        self.assertEqual((self.vault / "Projects" / "Glasses.md").read_text(), "- [x] from obsidian\n")
+        self.deck.ingest("claude-code", {"hook_event_name": "TaskCreated", "session_id": "s1", "cwd": self.root.as_posix(),
+                                         "task_id": "1", "task_subject": "push branch"})
+        task = self.open_todos()["push branch"]
+        self.assertEqual(task["source"], "claude-task")
+        self.assertIsNone(self.deck.mark_todo(task["id"]))  # only files can be written
+
+    def test_garbage_ids_are_refused(self):
+        for bad in ("", "../TODO.md", "x" * 20, "0" * 40):
+            self.assertIsNone(self.deck.mark_todo(bad))
+        self.assertEqual((self.root / "TODO.md").read_bytes().decode(), self.BODY)
+
+    def test_over_http_done_is_200_then_409(self):
+        R.save_devices(self.dir, {"dev_todo01": {"label": "t", "sha256": R.sha256(DEVICE_TOKEN), "created_at": R.now_iso()}})
+        httpd, relay = R.make_server(self.dir, port=0, projects=self.dir / "deck.projects.json")
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{httpd.server_port}"
+        try:
+            def call(method, path, token=DEVICE_TOKEN):
+                req = urllib.request.Request(base + path, method=method, headers={"Authorization": f"Bearer {token}"})
+                try:
+                    with urllib.request.urlopen(req, timeout=5) as resp:
+                        return resp.status, json.load(resp)
+                except urllib.error.HTTPError as err:
+                    return err.code, None
+            _, todos = call("GET", "/todos?scope=glasses")
+            tid = todos["items"][0]["id"]
+            self.assertEqual(call("POST", f"/todos/{tid}/done", relay.hook_key)[0], 401)
+            self.assertEqual(call("POST", f"/todos/{tid}/done")[0], 200)
+            self.assertEqual(call("POST", f"/todos/{tid}/done")[0], 409)
+            self.assertEqual(call("GET", "/todos?scope=glasses")[1]["items"][0]["text"], "record demo")
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+
 class Forwarder(unittest.TestCase):
     def test_slim_drops_text_and_patch_bodies(self):
         events = fixtures("codex")
