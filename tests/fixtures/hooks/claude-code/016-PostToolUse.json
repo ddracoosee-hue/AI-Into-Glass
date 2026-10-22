@@ -1,0 +1,42 @@
+{
+  "session_id": "d37e1171-106b-4c78-963e-9b61024a4ca9",
+  "transcript_path": "C:\\Users\\demo\\.claude\\projects\\H--deck-sandbox-rec\\d37e1171-106b-4c78-963e-9b61024a4ca9.jsonl",
+  "cwd": "C:\\deck-sandbox\\rec",
+  "prompt_id": "73e3a704-1734-453b-aa1e-63cb67c65841",
+  "permission_mode": "default",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "C:\\deck-sandbox\\rec\\src\\calc.py",
+    "old_string": "return a + b",
+    "new_string": "return b + a",
+    "replace_all": false
+  },
+  "tool_response": {
+    "filePath": "C:\\deck-sandbox\\rec\\src\\calc.py",
+    "oldString": "return a + b",
+    "newString": "return b + a",
+    "originalFile": "def add(a, b):\n    return a + b\n",
+    "structuredPatch": [
+      {
+        "oldStart": 1,
+        "oldLines": 2,
+        "newStart": 1,
+        "newLines": 2,
+        "lines": [
+          " def add(a, b):",
+          "-    return a + b",
+          "+    return b + a"
+        ]
+      }
+    ],
+    "userModified": false,
+    "replaceAll": false,
+    "contentNotInModelContext": true
+  },
+  "tool_use_id": "toolu_01W1R7RvbKkzCVuH972mB4Ns",
+  "duration_ms": 69
+}

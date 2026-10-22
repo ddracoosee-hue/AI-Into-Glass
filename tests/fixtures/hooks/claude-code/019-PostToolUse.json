@@ -1,0 +1,29 @@
+{
+  "session_id": "d37e1171-106b-4c78-963e-9b61024a4ca9",
+  "transcript_path": "C:\\Users\\demo\\.claude\\projects\\H--deck-sandbox-rec\\d37e1171-106b-4c78-963e-9b61024a4ca9.jsonl",
+  "cwd": "C:\\deck-sandbox\\rec",
+  "prompt_id": "73e3a704-1734-453b-aa1e-63cb67c65841",
+  "permission_mode": "default",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "TaskUpdate",
+  "tool_input": {
+    "taskId": "1",
+    "status": "completed"
+  },
+  "tool_response": {
+    "success": true,
+    "taskId": "1",
+    "updatedFields": [
+      "status"
+    ],
+    "statusChange": {
+      "from": "pending",
+      "to": "completed"
+    }
+  },
+  "tool_use_id": "toolu_01QUDEnnUEW4GNGmrWfnNoCK",
+  "duration_ms": 95
+}

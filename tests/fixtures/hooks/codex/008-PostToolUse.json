@@ -1,0 +1,15 @@
+{
+  "session_id": "01a16474-c122-7d61-8f06-9f447ebfe7e7",
+  "turn_id": "01a16474-cd9f-78d0-9430-e0e0112a7105",
+  "transcript_path": "C:\\Users\\demo\\.codex\\sessions\\2026\\10\\22\\rollout-2026-10-22T10-32-15-01a16474-c122-7d61-8f06-9f447ebfe7e7.jsonl",
+  "cwd": "C:\\deck-sandbox\\rec",
+  "hook_event_name": "PostToolUse",
+  "model": "gpt-6-astra",
+  "permission_mode": "default",
+  "tool_name": "apply_patch",
+  "tool_input": {
+    "command": "*** Begin Patch\n*** Update File: C:/deck-sandbox/rec/TODO.md\n@@\n+- [ ] third thing\n*** End of File\n*** End Patch"
+  },
+  "tool_response": "Exit code: 0\nWall time: 0 seconds\nOutput:\nSuccess. Updated the following files:\nM C:/deck-sandbox/rec/TODO.md\n",
+  "tool_use_id": "exec-69d3e921-0bd3-406c-8804-6ade68262c16"
+}

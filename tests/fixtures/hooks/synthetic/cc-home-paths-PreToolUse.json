@@ -1,0 +1,13 @@
+{
+  "session_id": "d37e1171-106b-4c78-963e-9b61024a4ca9",
+  "transcript_path": "C:\\Users\\demo\\.claude\\projects\\H--deck-sandbox-rec\\d37e1171-106b-4c78-963e-9b61024a4ca9.jsonl",
+  "cwd": "C:\\deck-sandbox\\rec",
+  "prompt_id": "00000000-0000-4000-8000-000000000000",
+  "permission_mode": "default",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_use_id": "toolu_01SYNTHETICHOMEPATHS0001",
+  "tool_input": {
+    "command": "type C:\\Users\\demo\\Downloads\\notes.txt && ls /c/Users/demo/dev/rec/src ~/x.log $HOME/.cache/y TOKEN=abc123"
+  }
+}

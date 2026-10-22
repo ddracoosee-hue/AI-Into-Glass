@@ -1,0 +1,11 @@
+{
+  "session_id": "01a16474-c122-7d61-8f06-9f447ebfe7e7",
+  "turn_id": "01a16474-cd9f-78d0-9430-e0e0112a7105",
+  "transcript_path": "C:\\Users\\demo\\.codex\\sessions\\2026\\10\\22\\rollout-2026-10-22T10-32-15-01a16474-c122-7d61-8f06-9f447ebfe7e7.jsonl",
+  "cwd": "C:\\deck-sandbox\\rec",
+  "hook_event_name": "Stop",
+  "model": "gpt-6-astra",
+  "permission_mode": "default",
+  "stop_hook_active": false,
+  "last_assistant_message": "<last_assistant_message omitted>"
+}

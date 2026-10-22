@@ -1,0 +1,8 @@
+{
+  "session_id": "d37e1171-106b-4c78-963e-9b61024a4ca9",
+  "transcript_path": "C:\\Users\\demo\\.claude\\projects\\H--deck-sandbox-rec\\d37e1171-106b-4c78-963e-9b61024a4ca9.jsonl",
+  "cwd": "C:\\deck-sandbox\\rec",
+  "hook_event_name": "CwdChanged",
+  "old_cwd": "C:\\deck-sandbox\\rec",
+  "new_cwd": "C:\\deck-sandbox\\rec\\src"
+}

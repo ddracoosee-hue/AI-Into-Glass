@@ -1,0 +1,24 @@
+{
+  "session_id": "d37e1171-106b-4c78-963e-9b61024a4ca9",
+  "transcript_path": "C:\\Users\\demo\\.claude\\projects\\H--deck-sandbox-rec\\d37e1171-106b-4c78-963e-9b61024a4ca9.jsonl",
+  "cwd": "C:\\deck-sandbox\\rec",
+  "prompt_id": "73e3a704-1734-453b-aa1e-63cb67c65841",
+  "permission_mode": "default",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "git status --short"
+  },
+  "tool_response": {
+    "stdout": "",
+    "stderr": "",
+    "interrupted": false,
+    "isImage": false,
+    "noOutputExpected": false
+  },
+  "tool_use_id": "toolu_01BZSgrxktj1D7zHx4Ygbf5J",
+  "duration_ms": 791
+}
