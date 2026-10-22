@@ -85,8 +85,10 @@ function frameFor(v: View): Frame {
     case 'prompt': {
       const secs = Math.max(0, Math.ceil((v.deadline - now()) / 1000))
       const more = v.waiting > 1 ? `  (+${v.waiting - 1})` : ''
+      // Two agents can share a folder, so the header names which one is asking.
+      const agent = ({ 'claude-code': 'Claude', codex: 'Codex' } as Record<string, string>)[v.req.session.agent] ?? v.req.session.agent
       return {
-        head: `${v.req.session.name} · ${v.req.tool}${more}`,
+        head: `${v.req.session.name} · ${agent} · ${v.req.tool}${more}`,
         clock: v.sending ? '…' : `${secs}s`,
         // TODO(hardware): check how the G2 firmware wraps this. evenhub-simulator 0.9.5 wraps by
         // character, so `rm -r build` broke as "rm -" / "r build", and the simulator says its font

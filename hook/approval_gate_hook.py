@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Approval Gate hook for Claude Code's PermissionRequest event.
+"""Approval Gate hook for the PermissionRequest event of Claude Code and Codex.
+
+Both agents send the same event name and accept the same decision object. `--agent codex`
+marks requests from Codex, whose shell commands and apply_patch edits arrive in their own shape.
 
 Silence means terminal. Unless the relay returns an explicit decision for this
 request's own id, the hook prints nothing and exits 0, and Claude Code shows its
@@ -23,6 +26,8 @@ SUMMARY_MAX = 60
 DETAIL_MAX = 200
 WAIT_TIMEOUT = 95  # relay answers within 90 s; Claude Code kills the hook at 100 s
 ID_RE = re.compile(r"req_[0-9A-Z]{26}")
+AGENTS = ("claude-code", "codex")
+PATCH_FILE = re.compile(r"^\*\*\* (Add|Update|Delete) File: (.+?)\s*$")
 
 # Never sent to the glasses: these always get the terminal prompt.
 DENY_COMMAND = [
@@ -152,6 +157,63 @@ def describe_command(command: str) -> tuple[dict | None, str]:
     return {"summary": summary, "detail": shown, "risk": risk}, ""
 
 
+def shape(value: dict) -> str:
+    """Field names and types only, for logging an input this hook can't read. Never values."""
+    return "keys " + ", ".join(f"{k}:{type(v).__name__}" for k, v in sorted(value.items()))[:150]
+
+
+def shell_command(value) -> str | None:
+    """Codex may send argv instead of a string. For `bash -lc <script>` the script is what runs."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list) and value and all(isinstance(a, str) for a in value):
+        if len(value) == 3 and value[1] in ("-c", "-lc", "-Command", "/c"):
+            return value[2]
+        return " ".join(value)
+    return None
+
+
+def patch_files(patch: str) -> list[list]:
+    """[op, path, added, removed] for each file in a Codex apply_patch body. Contents stay in here."""
+    files: list[list] = []
+    for line in patch.splitlines():
+        if m := PATCH_FILE.match(line):
+            files.append([m[1], m[2], 0, 0])
+        elif line.startswith("*** Move to: ") and files:
+            files.append(["Move", line[len("*** Move to: "):].strip(), 0, 0])
+        elif files and line.startswith("+") and not line.startswith("+++"):
+            files[-1][2] += 1
+        elif files and line.startswith("-") and not line.startswith("---"):
+            files[-1][3] += 1
+    return files
+
+
+def describe_patch(tool_input: dict, cwd: str) -> tuple[dict | None, str]:
+    """A Codex apply_patch: file names and line counts only, never the patch text."""
+    patch = tool_input.get("command")
+    if not isinstance(patch, str):
+        return None, f"unreadable patch ({shape(tool_input)})"
+    files = patch_files(patch)
+    if not files:
+        return None, "no files in patch"
+    risk, shown = "medium", []
+    for op, path, added, removed in files:
+        if has_hidden_chars(path):
+            return None, "hidden characters"
+        full = os.path.normpath(os.path.join(cwd, path))
+        if SENSITIVE_PATH.search(full):
+            return None, "sensitive path"
+        if op in ("Delete", "Move") or not inside(full, cwd):
+            risk = "high"
+        shown.append((op, display_path(full, cwd), added, removed))
+    detail = "; ".join(f"{op.lower()} {path} (+{a} -{r})" for op, path, a, r in shown)
+    if len(detail) > DETAIL_MAX:
+        return None, "too many files to show in full"
+    prefix, suffix = (f"{shown[0][0]} ", "") if len(shown) == 1 else ("Edit ", f" +{len(shown) - 1} more")
+    summary = prefix + clip(shown[0][1], SUMMARY_MAX - len(prefix) - len(suffix), keep_tail=True) + suffix
+    return {"summary": summary, "detail": detail, "risk": risk}, ""
+
+
 def describe_file(tool: str, tool_input: dict, cwd: str) -> tuple[dict | None, str]:
     path = tool_input.get("file_path") or tool_input.get("notebook_path")
     if not isinstance(path, str) or not path:
@@ -177,22 +239,25 @@ def describe_file(tool: str, tool_input: dict, cwd: str) -> tuple[dict | None, s
             "risk": "medium" if inside(path, cwd) else "high"}, ""
 
 
-def build_request(event: dict) -> tuple[dict | None, str]:
+def build_request(event: dict, agent: str = "claude-code") -> tuple[dict | None, str]:
     tool, tool_input = event.get("tool_name"), event.get("tool_input")
     cwd = event.get("cwd") or os.getcwd()
     if not isinstance(tool, str) or not isinstance(tool_input, dict) or not isinstance(cwd, str):
         return None, "malformed event"
     if tool in ("Bash", "PowerShell"):
-        command = tool_input.get("command")
-        described, reason = describe_command(command) if isinstance(command, str) else (None, "no command")
+        command = shell_command(tool_input.get("command"))
+        described, reason = (describe_command(command) if command is not None
+                             else (None, f"unreadable command ({shape(tool_input)})"))
     elif tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
         described, reason = describe_file(tool, tool_input, cwd)
+    elif tool == "apply_patch":
+        described, reason = describe_patch(tool_input, cwd)
     else:
         return None, "tool not handled"
     if described is None:
         return None, reason
     name = os.environ.get("APPROVAL_GATE_SESSION") or os.path.basename(cwd.rstrip("\\/")) or "session"
-    session = {"agent": "claude-code", "name": clip(redact(name), 40), "cwd": clip(redact(cwd).replace("\\", "/"), 200, keep_tail=True)}
+    session = {"agent": agent, "name": clip(redact(name), 40), "cwd": clip(redact(cwd).replace("\\", "/"), 200, keep_tail=True)}
     return {"session": session, "tool": tool, **described}, ""
 
 
@@ -202,8 +267,14 @@ def log_summary(event: dict) -> str:
     text = str(tool)
     if isinstance(tool_input, dict) and isinstance(cwd, str):
         path = tool_input.get("file_path") or tool_input.get("notebook_path")
-        if isinstance(tool_input.get("command"), str):
-            text = tool_input["command"]
+        if tool == "apply_patch":  # the command is the patch itself: log file names, never contents
+            patch = tool_input.get("command")
+            files = patch_files(patch) if isinstance(patch, str) else []
+            more = f" +{len(files) - 1} more" if len(files) > 1 else ""
+            first = display_path(os.path.normpath(os.path.join(cwd, files[0][1])), cwd) if files else ""
+            text = f"apply_patch {first}{more}" if files else "apply_patch"
+        elif shell_command(tool_input.get("command")) is not None:
+            text = shell_command(tool_input["command"])
         elif isinstance(path, str):
             text = f"{tool} {display_path(os.path.normpath(os.path.join(cwd, path)), cwd)}"
     text = " ".join(redact(text).split())
@@ -234,11 +305,11 @@ def ask_relay(home: Path, request: dict) -> dict | None:
     return final if isinstance(final, dict) and final.get("id") == rid else None
 
 
-def decide(event: dict, home: Path) -> dict | None:
-    """The hook's whole policy. Returns Claude Code's decision object, or None for the terminal prompt."""
+def decide(event: dict, home: Path, agent: str = "claude-code") -> dict | None:
+    """The hook's whole policy. Returns the agent's decision object, or None for its own approval prompt."""
     if event.get("hook_event_name") != "PermissionRequest" or not (home / "armed").exists():
         return None
-    request, reason = build_request(event)
+    request, reason = build_request(event, agent)
     if request is None:
         append_log(home, event="bypassed", tool=event.get("tool_name"), summary=log_summary(event), reason=reason)
         return None
@@ -257,10 +328,16 @@ def decide(event: dict, home: Path) -> dict | None:
     return None
 
 
+def agent_from_argv(argv: list[str]) -> str:
+    if "--agent" in argv and argv.index("--agent") + 1 < len(argv) and argv[argv.index("--agent") + 1] in AGENTS:
+        return argv[argv.index("--agent") + 1]
+    return "claude-code"
+
+
 def main() -> None:
     try:
         event = json.loads(sys.stdin.buffer.read() or b"{}")
-        decision = decide(event, state_dir()) if isinstance(event, dict) else None
+        decision = decide(event, state_dir(), agent_from_argv(sys.argv)) if isinstance(event, dict) else None
     except Exception:
         return
     if decision:

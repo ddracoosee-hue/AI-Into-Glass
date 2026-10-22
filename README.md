@@ -105,6 +105,22 @@ The installer keeps a `.approval-gate.bak` copy of the settings file and leaves 
 alone. It registers `PermissionRequest` with matcher `Bash|Write|Edit` and `timeout: 100`. While the
 gate is disarmed, the hook exits in about 0.1 s and prints nothing.
 
+### 5b. Codex
+
+Codex has the same `PermissionRequest` event and decision format, so the same hook serves it with
+`--agent codex`. Codex shell commands arrive as `Bash`; file edits arrive as `apply_patch`, and the
+glasses get file names and line counts, never the patch.
+
+```powershell
+python scripts/install_hook.py --codex --settings <project>/.codex/hooks.json   # matcher Bash|apply_patch
+codex -c approvals_reviewer=user                                                # in that project
+```
+
+Then in the Codex session, open `/hooks` and trust "Approval Gate". Codex skips new or changed hooks
+until you do, and it loads a project's `.codex/` only in a trusted project. `approvals_reviewer=user`
+matters if your config uses automatic review (`auto_review`), which sends approvals to a reviewer
+agent instead of to you.
+
 ### 6. Optional: a disarm hotkey
 
 ```powershell

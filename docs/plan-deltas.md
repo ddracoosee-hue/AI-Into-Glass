@@ -39,5 +39,9 @@ format; this file explains how the code got there.
   - commands with invisible or bidi characters
   - commands longer than the 200-character `detail`, which can't be shown in full
 - **Pairing uses a link, not a QR of our own.** `gatectl.py pair` prints a plugin URL carrying the relay URL and token, and `npx evenhub qr --url` turns it into the QR the Even app scans.
+- **Codex is supported now, through `PermissionRequest`, not `PreToolUse`.** The plan expected Codex to need a
+  `PreToolUse` hook with `permissionDecision`. Codex 0.162 has a `PermissionRequest` event with the same decision
+  object as Claude Code, so one hook serves both (`--agent codex`). `apply_patch` edits are summarized as file
+  names and line counts. The glasses header names the agent, because two agents can share a folder.
 - **PowerShell.** The hook handles the `PowerShell` tool's commands, but the matcher stays `Bash|Write|Edit` as the plan says. Adding `PowerShell` is a one-word change in `scripts/install_hook.py --matcher`.
 - **The hook is not installed globally.** `python scripts/install_hook.py` does that, when you choose.

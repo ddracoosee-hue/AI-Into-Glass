@@ -130,6 +130,64 @@ class Files(unittest.TestCase):
         self.assertEqual(H.build_request(event), (None, "tool not handled"))
 
 
+def codex(tool, **tool_input):
+    """A Codex PermissionRequest event: the documented fields, with tool_input.command for Bash and apply_patch."""
+    return {"session_id": "thr_1", "transcript_path": None, "cwd": CWD, "hook_event_name": "PermissionRequest",
+            "model": "gpt-5", "permission_mode": "default", "turn_id": "turn_1", "tool_name": tool,
+            "tool_input": {"description": "an agent-written label", **tool_input}}
+
+
+PATCH = """*** Begin Patch
+*** Update File: src/app.py
+@@ def main():
+-    run()
++    run(fast=True)
++    report()
+*** End Patch"""
+
+
+class Codex(unittest.TestCase):
+    def test_bash_string(self):
+        req, _ = H.build_request(codex("Bash", command="git push origin main"), "codex")
+        self.assertEqual((req["session"]["agent"], req["summary"], req["risk"]), ("codex", "git push origin main", "high"))
+        self.assertNotIn("agent-written", json.dumps(req))
+
+    def test_bash_argv_shows_the_script(self):
+        req, _ = H.build_request(codex("Bash", command=["bash", "-lc", "rm -r build"]), "codex")
+        self.assertEqual(req["summary"], "rm -r build")
+        self.assertIsNone(H.build_request(codex("Bash", command=["bash", "-lc", "rm -rf build"]), "codex")[0])
+
+    def test_apply_patch_sends_file_names_and_counts_never_contents(self):
+        req, _ = H.build_request(codex("apply_patch", command=PATCH), "codex")
+        self.assertEqual((req["summary"], req["detail"], req["risk"]), ("Update src/app.py", "update src/app.py (+2 -1)", "medium"))
+        self.assertNotIn("fast=True", json.dumps(req))
+
+    def test_multi_file_patch_with_a_delete_is_high_risk(self):
+        patch = "*** Begin Patch\n*** Add File: docs/new.md\n+# New\n*** Delete File: old.txt\n*** End Patch"
+        req, _ = H.build_request(codex("apply_patch", command=patch), "codex")
+        self.assertEqual((req["summary"], req["risk"]), ("Edit docs/new.md +1 more", "high"))
+        self.assertEqual(req["detail"], "add docs/new.md (+1 -0); delete old.txt (+0 -0)")
+
+    def test_patch_touching_a_sensitive_file_goes_to_the_terminal(self):
+        patch = "*** Begin Patch\n*** Update File: src/app.py\n+x\n*** Add File: .env\n+API_KEY=sk-live\n*** End Patch"
+        self.assertEqual(H.build_request(codex("apply_patch", command=patch), "codex"), (None, "sensitive path"))
+
+    def test_unreadable_input_logs_field_names_not_values(self):
+        request, reason = H.build_request(codex("apply_patch", patch={"secret": "sk-live-123"}), "codex")
+        self.assertIsNone(request)
+        self.assertIn("patch:dict", reason)
+        self.assertNotIn("sk-live-123", reason)
+
+    def test_bypassed_patch_is_logged_without_contents(self):
+        patch = "*** Begin Patch\n*** Add File: .env\n+API_KEY=sk-live-123\n*** End Patch"
+        self.assertEqual(H.log_summary(codex("apply_patch", command=patch)), "apply_patch .env")
+
+    def test_agent_flag(self):
+        self.assertEqual(H.agent_from_argv(["hook.py", "--agent", "codex"]), "codex")
+        self.assertEqual(H.agent_from_argv(["hook.py", "--agent", "other"]), "claude-code")
+        self.assertEqual(H.agent_from_argv(["hook.py"]), "claude-code")
+
+
 class LiveRelay(unittest.TestCase):
     """A live relay in a temp state dir, a paired device that has just polled, and the real hook script."""
     presence = R.PRESENCE
@@ -163,10 +221,10 @@ class LiveRelay(unittest.TestCase):
         except urllib.error.HTTPError as err:
             return err.code, json.loads(err.read())
 
-    def run_hook(self, event, stdin=None):
+    def run_hook(self, event, stdin=None, args=()):
         env = {**os.environ, "APPROVAL_GATE_HOME": str(self.home)}
         data = stdin if stdin is not None else json.dumps(event).encode()
-        done = subprocess.run([sys.executable, "-I", str(HOOK)], input=data, capture_output=True, env=env, timeout=30)
+        done = subprocess.run([sys.executable, "-I", str(HOOK), *args], input=data, capture_output=True, env=env, timeout=30)
         self.assertEqual(done.returncode, 0, done.stderr)
         return json.loads(done.stdout) if done.stdout.strip() else None
 
@@ -197,6 +255,14 @@ class EndToEnd(LiveRelay):
         out = self.run_hook(bash("git push origin main"))
         t.join()
         self.assertEqual(out, {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}})
+
+    def test_codex_approve_prints_the_same_allow(self):
+        t = self.phone("approve")
+        out = self.run_hook(codex("apply_patch", command=PATCH), args=("--agent", "codex"))
+        t.join()
+        self.assertEqual(out, {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}})
+        request = next(iter(self.relay.requests.values()))
+        self.assertEqual((request["session"]["agent"], request["tool"], request["summary"]), ("codex", "apply_patch", "Update src/app.py"))
 
     def test_deny_prints_deny_with_reason(self):
         t = self.phone("deny")

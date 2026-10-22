@@ -27,10 +27,10 @@ The hook, the relay and the plugin share no code. They share only this file.
 | `id` | relay | `req_` + a 26-character ULID. Assigned on `POST /requests`. |
 | `created_at` | relay | ISO 8601 with the PC's local offset. |
 | `expires_at` | relay | `created_at` + 90 s for `low`/`medium`, + 45 s for `high`. |
-| `session.agent` | hook | `claude-code` for now. |
+| `session.agent` | hook | `claude-code` or `codex`, from the hook's `--agent` flag. The glasses show it next to the session name. |
 | `session.name` | hook | Basename of the session's working directory, or `APPROVAL_GATE_SESSION`. Max 40 chars. |
 | `session.cwd` | hook | Working directory with the home directory replaced by `~`. |
-| `tool` | hook | Claude Code tool name: `Bash`, `Write`, `Edit`, … |
+| `tool` | hook | The agent's tool name: `Bash`, `Write`, `Edit` from Claude Code; `Bash`, `apply_patch` from Codex. |
 | `summary` | hook | What the glasses show. Max 60 characters. The hook truncates, never the plugin. Built from `tool_input`, never from text the agent wrote about itself. |
 | `detail` | hook | The full command or file path. Shown on swipe-down only. Max 200 characters. A command that does not fit is never sent: it goes to the terminal. |
 | `risk` | hook | `low` / `medium` / `high`, from the hook's local rule table. |
@@ -44,7 +44,8 @@ Claude Code is interrupted or the session ends. The request leaves the glasses a
 
 ## What never enters the contract
 
-- File contents. `Write` and `Edit` send a path and a line count only.
+- File contents. `Write` and `Edit` send a path and a line count only. A Codex `apply_patch` sends file names
+  and `+added -removed` counts, never the patch.
 - Environment variables, and secret-shaped strings in commands (`sk-…`, `ghp_…`, `AKIA…`, `TOKEN=…`).
   The hook replaces these with `[secret]`.
 - Absolute paths under the home directory. These become `~/…`, or a path relative to `cwd`.
@@ -89,9 +90,10 @@ the relay and `gatectl.py` create and remove it. Every change is a `gate.log` li
 
 `by` carries the device id when a device made the change.
 
-## Hook output to Claude Code
+## Hook output to the agent
 
-The hook answers Claude Code's `PermissionRequest` event with one of exactly two JSON objects, and only
+Claude Code and Codex both have a `PermissionRequest` event and accept the same decision object.
+The hook answers with one of exactly two JSON objects, and only
 when the relay returned a decision for the hook's own request `id`:
 
 ```json
@@ -103,7 +105,7 @@ when the relay returned a decision for the hook's own request `id`:
   "message": "The user denied this from Approval Gate on their glasses (dev_…). Do not retry it; continue without it or ask the user."}}}
 ```
 
-In every other case it prints nothing and exits 0, and Claude Code shows its own prompt.
+In every other case it prints nothing and exits 0, and the agent shows its own approval prompt.
 
 ## Decision rules
 
