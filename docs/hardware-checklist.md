@@ -14,6 +14,7 @@ added without a row here. Check each on a G2, then fix the code or delete the co
 | 6 | `plugin/src/gestures.ts` (long-press) | Long-press opens the menu the page declared | Long-press on the Deck shows Arm / Disarm, Start focus, End focus, Transitions |
 | 7 | `plugin/src/main.ts` (prompt wrap) | The firmware wraps the summary at word boundaries | `rm -r build` stays whole; a 60-character summary reads at a glance |
 | 8 | `plugin/src/main.ts` (foreground) | FOREGROUND_ENTER arrives after a real background, so polling resumes | Background the plugin and bring it back: the Deck refreshes within 2 s |
+| 9 | `plugin/src/main.ts` (storage) | The Even app keeps bridge storage across launches, so the since-you-looked cursor and opened failures survive | Open the plugin, close it, reopen: the since-you-looked screen appears if anything happened |
 
 ## Not verifiable in the simulator at all
 

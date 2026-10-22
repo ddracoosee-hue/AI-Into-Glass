@@ -15,6 +15,8 @@ const RESULT_MS = 1500
 const KEY_RELAY = 'gate.relay'
 const KEY_TOKEN = 'gate.token'
 const KEY_TRANSITIONS = 'deck.transitions'
+const KEY_SEEN = 'deck.seen-errors' // failures already opened on the glasses
+const KEY_LOOKED = 'deck.looked' // {cursor, at}: the event log position at the last view
 
 const bridge = await waitForEvenAppBridge()
 const now = () => performance.now()
@@ -22,20 +24,29 @@ const glasses = new Glasses(bridge)
 
 // ---- storage ---------------------------------------------------------------
 
+// HARDWARE: evenhub-simulator keeps bridge storage in memory, so it is empty after every launch,
+// while its WebView profile persists. The deck.* keys (no secrets) are therefore mirrored into the
+// WebView's localStorage. The pairing token stays in bridge storage only, as in v1. Whether the
+// Even app keeps bridge storage across launches is unverified: needs a G2.
+const MIRRORED = (key: string) => key.startsWith('deck.')
+
 async function load(key: string): Promise<string> {
+  let value = ''
   try {
-    return (await bridge.getLocalStorage(key)) || ''
+    value = (await bridge.getLocalStorage(key)) || ''
   } catch {
     return localStorage.getItem(key) ?? ''
   }
+  return value || (MIRRORED(key) ? localStorage.getItem(key) ?? '' : '')
 }
 
 async function store(key: string, value: string): Promise<void> {
+  const local = () => (value ? localStorage.setItem(key, value) : localStorage.removeItem(key))
   try {
     await bridge.setLocalStorage(key, value)
+    if (MIRRORED(key)) local()
   } catch {
-    if (value) localStorage.setItem(key, value)
-    else localStorage.removeItem(key)
+    local()
   }
 }
 
@@ -52,6 +63,20 @@ let client: DeckClient | null = null
   if (relay && token) client = new DeckClient(relay, token)
 }
 glasses.fadeIn = (await load(KEY_TRANSITIONS)) === 'on'
+let seenErrors: string[] = []
+try {
+  seenErrors = JSON.parse((await load(KEY_SEEN)) || '[]')
+} catch {
+  seenErrors = []
+}
+let looked: { cursor: number; at: number } | null = null
+try {
+  looked = JSON.parse((await load(KEY_LOOKED)) || 'null')
+} catch {
+  looked = null
+}
+let sinceShown = false
+console.debug('[deck] looked', looked ? looked.cursor : 'never')
 
 // ---- state -------------------------------------------------------------------
 
@@ -81,7 +106,43 @@ const clock = () => new Date().toTimeString().slice(0, 5)
 
 function dataFor(page: Page): Data {
   const own = cache.get(pageKey(page))
-  return { armed: latest?.armed ?? false, clock: clock(), rootDeck, ...own, runAge: own ? (now() - own.at) / 1000 : 0 }
+  const spotlight = page.kind === 'deck' ? (own?.deck ?? rootDeck)?.errors.find(e => !seenErrors.includes(e.error ?? e.id ?? '')) : undefined
+  const spotId = spotlight ? spotlight.error ?? spotlight.id : undefined
+  if (spotlight && spotId !== lastSpotlight) console.log('[deck] spotlight', (lastSpotlight = spotId), spotlight.detail)
+  return { armed: latest?.armed ?? false, clock: clock(), rootDeck, ...own, spotlight, runAge: own ? (now() - own.at) / 1000 : 0 }
+}
+
+let lastSpotlight: string | undefined
+
+function markSeen(errorId: string): void {
+  if (seenErrors.includes(errorId)) return
+  seenErrors = [errorId, ...seenErrors].slice(0, 30)
+  void store(KEY_SEEN, JSON.stringify(seenErrors))
+}
+
+// Since you looked: on open, one screen of what finished, failed or fell back to the terminal while
+// the plugin was closed. The cursor is the relay's event id at the last poll.
+async function sinceYouLooked(cursor: number): Promise<void> {
+  if (sinceShown || !client) return
+  sinceShown = true
+  if (!looked || looked.cursor >= cursor) return
+  const { events, reset } = await client.events(looked.cursor).catch(() => ({ events: [], reset: false, cursor }))
+  if (reset) return
+  const notable = events.filter(e => (e.type === 'run' && e.status === 'ok') || e.type === 'error'
+    || (e.type === 'approval' && ['refused', 'timeout', 'cancelled'].includes(String(e.status))))
+  if (!notable.length || stack.length > 1) return
+  const page: Page = { kind: 'since', scope: 'all', label: 'SINCE YOU LOOKED', cursor: 0, top: 0 }
+  cache.set(pageKey(page), { since: { events: notable, away_s: Math.max(0, (Date.now() - looked.at) / 1000) }, at: now() })
+  console.log('[deck] since you looked', notable.length, 'events')
+  stack = [...stack, page]
+}
+
+let lookedSaved = 0
+function saveLooked(cursor: number): void {
+  if (!sinceShown || now() - lookedSaved < 10_000) return
+  lookedSaved = now()
+  looked = { cursor, at: Date.now() }
+  void store(KEY_LOOKED, JSON.stringify(looked))
 }
 
 // ---- painting ------------------------------------------------------------------
@@ -123,7 +184,9 @@ function pagePaint(s: Screen, page: Page): Paint {
     return { template: 'detail', key: s.key, menu: s.menu, slots: {
       bar: barSlot, headline: { text: s.headline, color: 4 }, body: { text: s.body, color: 3 }, hint: { text: s.hint, color: 2 } } }
   }
-  page.cursor = Math.max(0, Math.min(page.cursor, s.rows.length - 1))
+  const kept = page.cursorKey ? s.rows.findIndex(r => r.key === page.cursorKey) : -1
+  page.cursor = kept >= 0 ? kept : Math.max(0, Math.min(page.cursor, s.rows.length - 1))
+  page.cursorKey = s.rows[page.cursor]?.key
   page.top = windowFor(page.cursor, page.top, s.rows.length)
   const slots: Paint['slots'] = { bar: barSlot, note: { text: s.note, color: 1 }, hint: { text: s.hint, color: 2 } }
   for (let i = 0; i < VISIBLE_ROWS; i++) {
@@ -184,7 +247,11 @@ async function fetchPage(page: Page): Promise<void> {
     }
     case 'needs': got = { needs: await c.needs(page.scope) }; break
     case 'sessions': got = { sessions: await c.sessions(page.scope) }; break
-    case 'running': got = { runs: await c.runs(page.scope) }; break
+    case 'running': {
+      got = { runs: await c.runs(page.scope) }
+      console.debug('[deck] running', got.runs!.items.map(r => r.id).join(',') || '-')
+      break
+    }
     case 'projects': case 'focus': got = { projects: await c.projects() }; break
     case 'todos': got = { todos: await c.todos(page.scope) }; break
     case 'session': got = { session: await c.session(id) }; break
@@ -192,7 +259,12 @@ async function fetchPage(page: Page): Promise<void> {
     case 'todo': got = { todo: (await c.todos(page.scope)).items.find(t => t.id === id) }; break
     case 'card': got = { need: (await c.needs('all')).items.find(n => n.kind === 'card' && n.id === id) }; break
     case 'commits': got = { project: await c.project(page.scope) }; break
-    case 'error': got = { error: (rootDeck ?? await c.deck('all')).errors.find(e => (e.error ?? e.id) === id) }; break
+    case 'error': {
+      got = { error: (rootDeck ?? await c.deck('all')).errors.find(e => (e.error ?? e.id) === id) }
+      markSeen(id) // opened: the spotlight lets go of it
+      break
+    }
+    case 'since': return // filled once, at open
     default: got = {}
   }
   cache.set(key, { ...got, at: now() })
@@ -213,10 +285,12 @@ async function poll(): Promise<void> {
     latest = await client.poll()
     message = null
     applyGate(latest)
-    const page = top()
     rootDeck = await client.deck('focus') // the status bar's focus, on every page
-    if (page.kind === 'deck' && page.scope === 'focus') cache.set(pageKey(page), { deck: rootDeck, at: now() })
-    else await fetchPage(page)
+    await sinceYouLooked(rootDeck.cursor)
+    saveLooked(rootDeck.cursor)
+    const current = top()
+    if (current.kind === 'deck' && current.scope === 'focus') cache.set(pageKey(current), { deck: rootDeck, at: now() })
+    else await fetchPage(current)
     render()
   } catch (err) {
     if (err instanceof AuthError) message = 'unpaired'
@@ -334,7 +408,13 @@ async function act(action: Action | undefined): Promise<void> {
     case 'focus-start': return push({ kind: 'focus', scope: 'all', label: 'FOCUS' })
     case 'focus-end': await client.endFocus().catch(() => null); return void poll()
     case 'focus-project': await client.setFocus([action.project], 25).catch(() => null); return void poll()
-    case 'mute': case 'phone': case 'none':
+    case 'mute':
+      await client.mute(action.session, true).catch(err => console.warn('[deck] mute failed', String(err)))
+      console.log('[deck] muted', action.session)
+      if (top().kind === 'session' && top().id === action.session) return pop()
+      return void poll()
+    case 'back': return pop()
+    case 'phone': case 'none':
       console.log('[deck] action not built yet:', action.do)
   }
 }
@@ -343,8 +423,10 @@ function move(down: boolean): void {
   if (!screen || screen.template !== 'list' || !screen.rows.length) return
   const page = top()
   const next = Math.max(0, Math.min(screen.rows.length - 1, page.cursor + (down ? 1 : -1)))
+  console.debug('[deck] cursor', screen.rows[next].key) // every swipe, even against the end: the sim runs count on it
   if (next === page.cursor) return
   page.cursor = next
+  page.cursorKey = screen.rows[next].key
   render()
 }
 

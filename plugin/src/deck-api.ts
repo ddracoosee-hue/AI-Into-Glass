@@ -17,7 +17,7 @@ export interface Session {
   state: State
   waiting_for: 'approval' | 'input' | null
   state_for_s: number
-  current: { tool: string; target: string; since: string } | null
+  current: { tool: string; target: string; since: string; run?: string } | null
   counts: { tools: number; approved: number; denied: number; failed: number }
   error: boolean
   muted: boolean
@@ -122,6 +122,20 @@ export interface DeckCounts {
   cursor: number
 }
 
+export interface DeckEvent {
+  id: number
+  ts: string
+  type: string
+  status?: string
+  project?: string
+  tool?: string
+  target?: string
+  summary?: string
+  state?: string
+  detail?: string
+  [k: string]: unknown
+}
+
 export interface Rows<T> {
   items: T[]
   more: number
@@ -158,6 +172,19 @@ export class DeckClient extends RelayClient {
     if (res.status === 200) return 'done'
     if (res.status === 409) return 'changed'
     throw new Error(`relay answered ${res.status}`)
+  }
+
+  /** Events after `since`, without waiting. `reset` means the relay's log started over. */
+  async events(since: number): Promise<{ events: DeckEvent[]; cursor: number; reset: boolean }> {
+    const res = await this.call('GET', `/events?since=${since}&wait=0`)
+    if (res.status === 204) return { events: [], cursor: Number(res.headers.get('X-Deck-Cursor') ?? since), reset: false }
+    if (res.status !== 200) throw new Error(`relay answered ${res.status}`)
+    return res.json()
+  }
+
+  async mute(session: string, muted: boolean): Promise<void> {
+    const res = await this.call('POST', `/sessions/${encodeURIComponent(session)}/mute`, { muted })
+    if (res.status !== 200) throw new Error(`relay answered ${res.status}`)
   }
 
   async setFocus(projects: string[], minutes: 25 | 50 | null): Promise<Focus> {

@@ -79,16 +79,19 @@ export class Glasses {
       this.queue = this.queue.then(() => this.rebuild(prev, next, fade)).catch(err => console.error('[deck] rebuild failed', err))
       return
     }
+    const changed: string[] = []
     for (const [name, slot] of Object.entries(next.slots)) {
       const was = this.painted[name]
       if (was && was.text === slot.text && was.color === slot.color) continue
       this.painted[name] = { ...slot }
+      changed.push(name)
       const id = LAYOUTS[next.template][name].id
       this.stats.upgrades++
       this.queue = this.queue
         .then(() => this.bridge.textContainerUpgrade(new TextContainerUpgrade({ containerID: id, containerName: name, content: slot.text || ' ', textColor: slot.color })))
         .catch(err => console.error('[deck] upgrade failed', name, err))
     }
+    if (changed.length) console.debug('[deck] upgrade', next.key, changed.join(','))
   }
 
   private async rebuild(prev: Paint | null, next: Paint, fade: boolean): Promise<void> {

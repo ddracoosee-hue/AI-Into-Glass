@@ -1,11 +1,11 @@
 // Every glasses screen as data: which template, what each container says, what tap opens and what
 // the long-press menu offers. Pure, so test/screens.test.ts can check rows and limits without a bridge.
-import type { DeckCounts, DeckError, Need, Project, Rows, Run, Session, SessionDetail, Todo } from './deck-api.ts'
+import type { DeckCounts, DeckError, DeckEvent, Need, Project, Rows, Run, Session, SessionDetail, Todo } from './deck-api.ts'
 import { ago, bar, columns, fit, SCREEN_W } from './text.ts'
 
 export type Template = 'list' | 'detail' | 'prompt'
 export type ListKind = 'deck' | 'needs' | 'sessions' | 'running' | 'projects' | 'project' | 'todos' | 'focus'
-export type DetailKind = 'session' | 'run' | 'todo' | 'card' | 'commits' | 'error'
+export type DetailKind = 'session' | 'run' | 'todo' | 'card' | 'commits' | 'error' | 'since'
 export type PageKind = ListKind | DetailKind
 
 /** One level of the stack. `scope` is all, focus or a project id; `cursor` and `top` belong to lists. */
@@ -16,6 +16,8 @@ export interface Page {
   label?: string
   cursor: number
   top: number
+  /** The highlighted row's key, so the cursor stays on it when rows are added above or re-sorted. */
+  cursorKey?: string
 }
 
 export type Action =
@@ -24,7 +26,7 @@ export type Action =
   | { do: 'todo-done'; id: string }
   | { do: 'arm-toggle' } | { do: 'focus-start' } | { do: 'focus-end' } | { do: 'transitions' }
   | { do: 'focus-project'; project: string } | { do: 'mute'; session: string } | { do: 'phone'; page: Omit<Page, 'cursor' | 'top'> }
-  | { do: 'none' }
+  | { do: 'back' } | { do: 'none' }
 
 export interface Row {
   key: string
@@ -95,11 +97,20 @@ export interface Data {
   clock: string
   /** Seconds since `run` was fetched, so ELAPSED can tick between polls. */
   runAge?: number
+  /** The newest failure not yet opened on the glasses; it pins a row to the top of the Deck. */
+  spotlight?: DeckError
+  /** What happened while nobody looked: the relay's events since the last view. */
+  since?: { events: DeckEvent[]; away_s: number }
 }
 
 const open = (kind: PageKind, scope: string, id?: string, label?: string): Action => ({ do: 'open', page: { kind, scope, id, label } })
 const phone = (kind: PageKind, scope: string, id?: string): Action => ({ do: 'phone', page: { kind, scope, id } })
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+/** Why an approval went to the terminal, in the words the glasses use. */
+const WHY: Record<string, string> = { 'no device listening': 'nobody watching', 'outside focus': 'outside focus', muted: 'muted',
+  timeout: 'timed out', cancelled: 'cancelled' }
+/** A label and its value, the value at a fixed x so detail bodies line up in a proportional font. */
+const kv = (label: string, value: string) => columns([{ text: label, x: 0 }, { text: value, x: 76 }], ROW_W)
 
 // ---- menus (ids are stable per object type; labels never change without a rebuild) --------------
 
@@ -110,12 +121,13 @@ export const DECK_MENU: Menu = [
   { id: 4, name: 'Transitions on / off', action: { do: 'transitions' } },
 ]
 
-export function sessionMenu(s: { id: string; project: string }): Menu {
+export function sessionMenu(s: { id: string; project: string; current?: { run?: string; tool: string; target: string } | null }): Menu {
+  const run = s.current?.run
   return [
     { id: 10, name: 'Open on phone', action: phone('session', s.project, s.id) },
     { id: 11, name: 'Focus on its project', action: { do: 'focus-project', project: s.project } },
     { id: 12, name: 'Mute this session', action: { do: 'mute', session: s.id } },
-    { id: 13, name: 'Jump to its running tool', action: open('running', s.project) },
+    { id: 13, name: 'Jump to its running tool', action: run ? open('run', s.project, run, s.current?.target || s.current?.tool) : open('running', s.project, undefined, 'RUNNING') },
   ]
 }
 
@@ -247,7 +259,15 @@ export function listScreen(stack: Page[], d: Data): ListScreen {
     case 'deck': {
       const c = d.deck
       const note = c?.outside_focus ? `outside focus: ${c.outside_focus.active} active, ${c.outside_focus.waiting} waiting` : ''
-      return { ...base, rows: deckRows(c, page.scope), note, hint: stack.length === 1 ? 'tap open · 2× exit · hold actions' : 'tap open · 2× back · hold actions',
+      const rows = deckRows(c, page.scope)
+      const e = d.spotlight
+      if (e) {
+        // Pinned until opened: one row, above everything, at full brightness when highlighted.
+        rows.unshift({ key: `error:${e.error ?? e.id}`, cols: [{ text: 'FAILED', x: 0 }, { text: AGENT_BADGE[e.agent] ?? '', x: 70 },
+          { text: `${e.target || e.tool || e.project} · ${e.detail}`, x: 118 }], open: open('error', e.project, e.error ?? e.id, 'FAILED'),
+          menu: sessionMenu({ id: e.session, project: e.project }) })
+      }
+      return { ...base, rows, note, hint: stack.length === 1 ? 'tap open · 2× exit · hold actions' : 'tap open · 2× back · hold actions',
         menu: DECK_MENU, empty: '' }
     }
     case 'project': {
@@ -304,8 +324,8 @@ export function detailScreen(stack: Page[], d: Data): DetailScreen {
         : `${s.state.toUpperCase()} · ${ago(s.state_for_s)}`
       const current = s.current ? `${s.current.tool}  ${s.current.target}` : ''
       const lines = [
-        s.title && `Title   ${s.title}`,
-        `Model   ${[s.model || '—', `${s.counts.tools} tools`, `${s.counts.approved} approved`, s.counts.failed ? `${s.counts.failed} failed` : ''].filter(Boolean).join(' · ')}`,
+        s.title && kv('Title', s.title),
+        kv('Model', [s.model || '—', `${s.counts.tools} tools`, `${s.counts.approved} approved`, s.counts.failed ? `${s.counts.failed} failed` : ''].filter(Boolean).join(' · ')),
         lastRun(s),
       ].filter(Boolean) as string[]
       return { ...base, headline: `${head}\n${current}`.trim(), body: lines.join('\n'),
@@ -319,21 +339,21 @@ export function detailScreen(stack: Page[], d: Data): DetailScreen {
       const elapsed = r.elapsed_s + (live ? Math.floor(d.runAge ?? 0) : 0)
       const started = new Date(r.started_at)
       return { ...base, headline: live ? `ELAPSED ${ago(elapsed, true)}` : `${r.status.toUpperCase()} after ${ago(elapsed, true)}`,
-        body: [`Agent    ${AGENT_NAME[r.agent] ?? r.agent} · ${r.project_name}`, `Tool     ${r.tool}${r.kind === 'subagent' ? ' (subagent)' : ''}`,
-          r.target && `Target   ${r.target}`, `Started  ${String(started.getHours()).padStart(2, '0')}:${String(started.getMinutes()).padStart(2, '0')}`].filter(Boolean).join('\n'),
+        body: [kv('Agent', `${AGENT_NAME[r.agent] ?? r.agent} · ${r.project_name}`), kv('Tool', `${r.tool}${r.kind === 'subagent' ? ' (subagent)' : ''}`),
+          r.target && kv('Target', r.target), kv('Started', `${String(started.getHours()).padStart(2, '0')}:${String(started.getMinutes()).padStart(2, '0')}`)].filter(Boolean).join('\n'),
         hint: 'tap open session · 2× back', menu: runMenu(r), primary: open('session', r.project, r.session, `${r.project_name} · ${AGENT_NAME[r.agent] ?? ''}`) }
     }
     case 'todo': {
       const t = d.todo
       if (!t) return { ...base, headline: 'Loading…', body: '', hint: '2× back', menu: [] }
       const writable = t.source !== 'claude-task'
-      return { ...base, headline: t.done ? 'DONE' : t.text, body: [`Project  ${t.project_name}`, `From     ${t.source === 'claude-task' ? 'Claude Code task list' : t.file}`].join('\n'),
+      return { ...base, headline: t.done ? 'DONE' : t.text, body: [kv('Project', t.project_name), kv('From', t.source === 'claude-task' ? 'Claude Code task list' : t.file ?? '')].join('\n'),
         hint: t.done ? '2× back' : writable ? 'tap done · 2× back · hold actions' : 'done in Claude Code · 2× back',
         menu: todoMenu(t), primary: !t.done && writable ? { do: 'todo-done', id: t.id } : undefined }
     }
     case 'card': {
       const n = d.need
-      return { ...base, headline: n ? n.title : 'Gone', body: n ? `Project  ${n.project_name}\nLevel    ${n.level ?? 'info'}\nPosted   ${ago(n.for_s)} ago` : 'This card expired or was cleared.',
+      return { ...base, headline: n ? n.title : 'Gone', body: n ? [kv('Project', n.project_name), kv('Level', n.level ?? 'info'), kv('Posted', `${ago(n.for_s)} ago`)].join('\n') : 'This card expired or was cleared.',
         hint: '2× back', menu: [{ id: 50, name: 'Open on phone', action: phone('card', page.scope, page.id) }] }
     }
     case 'commits': {
@@ -341,9 +361,26 @@ export function detailScreen(stack: Page[], d: Data): DetailScreen {
       return { ...base, headline: p ? `${p.name} · ${p.branch || 'no branch'}` : 'Loading…', body: (p?.commits ?? []).map(c => `· ${c}`).join('\n') || (p ? 'No commits.' : ''),
         hint: '2× back', menu: projectMenu({ id: page.scope }) }
     }
+    case 'since': {
+      const ev = d.since?.events ?? []
+      const runs = ev.filter(e => e.type === 'run' && e.status === 'ok').length
+      const failed = ev.filter(e => e.type === 'error')
+      const fell = ev.filter(e => e.type === 'approval' && ['refused', 'timeout', 'cancelled'].includes(String(e.status)))
+      const decided = ev.filter(e => e.type === 'approval' && (e.status === 'approved' || e.status === 'denied')).length
+      const ended = ev.filter(e => e.type === 'session' && e.state === 'ended').length
+      const lines = [
+        kv('Finished', `${plural(runs, 'run')}${ended ? ` · ${plural(ended, 'session')} ended` : ''}${decided ? ` · ${decided} decided` : ''}`),
+        ...failed.slice(0, 2).map(e => kv('Failed', `${e.target || e.tool} · ${e.detail} (${e.project})`)),
+        ...fell.slice(0, 2).map(e => kv('Terminal', `${e.summary || e.tool} (${e.project}, ${WHY[String(e.status === 'refused' ? e.reason : e.status)] ?? e.status})`)),
+      ]
+      const more = failed.length + fell.length - Math.min(failed.length, 2) - Math.min(fell.length, 2)
+      if (more > 0) lines.push(`… ${more} more on phone`)
+      return { ...base, headline: `SINCE YOU LOOKED · ${ago(d.since?.away_s ?? 0)}\n${plural(failed.length, 'failure')} · ${fell.length} fell back to the terminal`,
+        body: lines.map(l => fit(l, ROW_W)).join('\n'), hint: 'tap or 2× to the Deck', menu: [], primary: { do: 'back' } }
+    }
     case 'error': {
       const e = d.error
-      return { ...base, headline: e ? `FAILED · ${e.detail}` : 'Gone', body: e ? [`Agent    ${AGENT_NAME[e.agent] ?? e.agent} · ${e.project}`, e.tool && `Tool     ${e.tool}`, e.target && `Target   ${e.target}`].filter(Boolean).join('\n') : '',
+      return { ...base, headline: e ? `FAILED · ${e.detail}` : 'Gone', body: e ? [kv('Agent', `${AGENT_NAME[e.agent] ?? e.agent} · ${e.project}`), e.tool && kv('Tool', e.tool), e.target && kv('Target', e.target)].filter(Boolean).join('\n') : '',
         hint: e ? 'tap open session · 2× back' : '2× back', menu: e ? sessionMenu({ id: e.session, project: e.project }) : [],
         primary: e ? open('session', e.project, e.session, `${e.project} · ${AGENT_NAME[e.agent] ?? ''}`) : undefined }
     }
@@ -353,12 +390,13 @@ export function detailScreen(stack: Page[], d: Data): DetailScreen {
 function lastRun(s: SessionDetail): string {
   const run = [...s.events].reverse().find(e => e.type === 'run' && e.status !== 'running')
   if (!run) return ''
-  return `Last    ${fit(`${run.target || run.tool}  ${run.tool}`, ROW_W - 80)}`
+  const age = Math.max(0, (Date.now() - Date.parse(String(run.ts))) / 1000)
+  return kv('Last', [run.target ? `${run.target}  ${run.tool}` : String(run.tool), ago(age)].join(' · '))
 }
 
 export function screenFor(stack: Page[], d: Data): Screen {
   const kind = stack[stack.length - 1].kind
-  return ['session', 'run', 'todo', 'card', 'commits', 'error'].includes(kind) ? detailScreen(stack, d) : listScreen(stack, d)
+  return ['session', 'run', 'todo', 'card', 'commits', 'error', 'since'].includes(kind) ? detailScreen(stack, d) : listScreen(stack, d)
 }
 
 /** A row as it appears on the glasses: the › marker on the highlighted one, columns at pixel x. */
