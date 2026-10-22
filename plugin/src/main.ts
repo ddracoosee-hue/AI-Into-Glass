@@ -1,6 +1,6 @@
 import { waitForEvenAppBridge } from '@evenrealities/even_hub_sdk'
 import { AuthError, type PendingRequest, type Poll } from './relay.ts'
-import { DeckClient, type DeckCounts } from './deck-api.ts'
+import { DeckClient, type DeckCounts, type FocusSummary } from './deck-api.ts'
 import { createGestures } from './gestures.ts'
 import { Glasses, type Paint } from './glasses.ts'
 import {
@@ -8,10 +8,11 @@ import {
   type Action, type Data, type Menu, type Page, type Screen,
 } from './screens.ts'
 import { mountPhone, type Frame } from './phone.ts'
-import { bar, fit } from './text.ts'
+import { bar, columns, fit } from './text.ts'
 
 const POLL_MS = 2000
 const RESULT_MS = 1500
+const SUMMARY_MS = 4000
 const KEY_RELAY = 'gate.relay'
 const KEY_TOKEN = 'gate.token'
 const KEY_TRANSITIONS = 'deck.transitions'
@@ -101,6 +102,8 @@ let stack: Page[] = [root()]
 let message: 'unpaired' | 'offline' | null = client ? null : 'unpaired'
 let prompt: Prompt | null = null
 let result: { text: string; until: number } | null = null
+let summary: { s: FocusSummary; until: number } | null = null
+let focusSince: string | null = null // started_at of the focus block the last poll saw
 let latest: Poll | null = null
 let rootDeck: DeckCounts | undefined
 const cache = new Map<string, Partial<Data> & { at: number }>()
@@ -178,6 +181,28 @@ function resultPaint(text: string): Paint {
     slots: { head: { text: 'APPROVAL', color: 3 }, clock: { text: '', color: 4 }, source: { text: '', color: 2 }, body: { text, color: 4 }, risk: { text: '', color: 2 }, hint: { text: '', color: 2 } } }
 }
 
+// The closing beat of a focus block: four seconds of what it got done, then the Deck.
+function summaryPaint(s: FocusSummary): Paint {
+  const pair = (a: string, b: string) => columns([{ text: a, x: 0 }, { text: b, x: 100 }], 564)
+  return { template: 'detail', key: `summary:${s.reason}`, menu: [],
+    slots: { bar: { text: bar(`FOCUS · ${s.projects.join('+')}`, clock(), 564), color: 3 },
+      headline: { text: `FOCUS DONE · ${s.minutes} min\n${s.reason === 'timer' ? 'the timer ran out' : s.reason === 'disarmed' ? 'the gate was disarmed' : 'ended from the Deck'}`, color: 4 },
+      body: { text: [pair('Approved', String(s.approved)), pair('Denied', String(s.denied)), pair('Runs', `${s.runs} finished`), pair('To-dos', `${s.todos} done`)].join('\n'), color: 3 },
+      hint: { text: 'back to the Deck in a moment', color: 2 } } }
+}
+
+function showSummary(s: FocusSummary): void {
+  if (summary && now() < summary.until) return
+  summary = { s, until: now() + SUMMARY_MS }
+  focusSince = null
+  console.log('[deck] focus summary', JSON.stringify({ minutes: s.minutes, approved: s.approved, denied: s.denied, runs: s.runs, todos: s.todos }))
+  render()
+  window.setTimeout(() => {
+    summary = null
+    render()
+  }, SUMMARY_MS)
+}
+
 function messagePaint(kind: 'unpaired' | 'offline'): Paint {
   const body = kind === 'unpaired' ? 'Run gatectl.py pair on the PC\nand open the link on your phone.' : 'Retrying every 2 s.'
   return { template: 'detail', key: `message:${kind}`, menu: [],
@@ -214,11 +239,12 @@ function render(): void {
   if (message) paint = messagePaint(message)
   else if (result && now() < result.until) paint = resultPaint(result.text)
   else if (prompt) paint = promptPaint(prompt)
+  else if (summary && now() < summary.until) paint = summaryPaint(summary.s)
   else {
     screen = screenFor(stack, dataFor(top()))
     paint = pagePaint(screen, top())
   }
-  const id = paint.key.startsWith('prompt:') || paint.key.startsWith('result:') || paint.key.startsWith('message:') ? paint.key : `${stack.length}:${paint.key}`
+  const id = /^(prompt|result|message|summary):/.test(paint.key) ? paint.key : `${stack.length}:${paint.key}`
   if (id !== view.id) {
     view = { id, shownAt: now() } // a new screen: taps are locked out for GRACE_MS
     gestures.cancelTap()
@@ -300,6 +326,12 @@ async function poll(): Promise<void> {
     message = null
     applyGate(latest)
     rootDeck = await client.deck('focus') // the status bar's focus, on every page
+    // Focus that ended without us (the timer, a disarm elsewhere) still gets its summary screen.
+    if (focusSince && !rootDeck.focus) {
+      const { last_summary } = await client.focus()
+      if (last_summary) showSummary(last_summary)
+    }
+    focusSince = rootDeck.focus?.started_at ?? null
     await sinceYouLooked(rootDeck.cursor)
     saveLooked(rootDeck.cursor)
     const current = top()
@@ -427,8 +459,31 @@ async function act(action: Action | undefined): Promise<void> {
       return void poll()
     }
     case 'focus-start': return push({ kind: 'focus', scope: 'all', label: 'FOCUS' })
-    case 'focus-end': await client.endFocus().catch(() => null); return void poll()
-    case 'focus-project': await client.setFocus([action.project], 25).catch(() => null); return void poll()
+    case 'focus-end': {
+      const ended = await client.endFocus().catch(() => null)
+      if (ended) showSummary(ended)
+      if (top().kind === 'focus') pop()
+      return void poll()
+    }
+    case 'focus-project': {
+      await client.setFocus([action.project], 25).catch(err => console.warn('[deck] focus failed', String(err)))
+      console.log('[deck] focus on', action.project)
+      return void poll()
+    }
+    case 'pick': {
+      const page = top()
+      const picked = page.picked ?? [...(rootDeck?.focus?.projects ?? [])]
+      page.picked = picked.includes(action.project) ? picked.filter(p => p !== action.project)
+        : picked.length < 2 ? [...picked, action.project] : picked
+      return render()
+    }
+    case 'focus-go': {
+      const picked = top().picked ?? rootDeck?.focus?.projects ?? []
+      if (!picked.length) return
+      await client.setFocus(picked, action.minutes).catch(err => console.warn('[deck] focus failed', String(err)))
+      console.log('[deck] focus on', picked.join('+'), action.minutes ?? 'no timer')
+      return pop()
+    }
     case 'mute':
       await client.mute(action.session, true).catch(err => console.warn('[deck] mute failed', String(err)))
       console.log('[deck] muted', action.session)
@@ -471,6 +526,10 @@ const gestures = createGestures(() => view, {
     if (message === 'offline') return void poll()
     if (message || result) return
     if (prompt) return void send('approve')
+    if (summary && now() < summary.until) {
+      summary = null
+      return render()
+    }
     if (!screen) return
     if (screen.template === 'list') return void act(screen.rows[top().cursor]?.open)
     return void act(screen.primary)
@@ -479,6 +538,10 @@ const gestures = createGestures(() => view, {
     if (prompt) return void send('deny')
     if (result) return
     if (message) return exit()
+    if (summary && now() < summary.until) {
+      summary = null
+      return render()
+    }
     pop()
   },
   swipe(down) {

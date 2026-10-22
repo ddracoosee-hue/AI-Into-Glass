@@ -112,6 +112,9 @@ export function createGestures(view: () => View, sink: Sink, clock: Clock) {
     if (is(OsEventTypeList.LONG_PRESS_EVENT) || is(OsEventTypeList.LONG_PRESS_RELEASE_EVENT)) return
     if (sys === OsEventTypeList.IMU_DATA_REPORT) return
     if (!event.sysEvent && !event.textEvent && !event.listEvent) return // audio and anything else
+    // While the menu is open, swipes move its highlight. The simulator also hands them to the page
+    // underneath; they belong to the menu alone.
+    if (menuOpen) return
     if (!foreground) {
       foreground = true // input means we're in front, whatever the lifecycle events said
       sink.foreground(true)

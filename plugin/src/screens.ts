@@ -18,6 +18,8 @@ export interface Page {
   top: number
   /** The highlighted row's key, so the cursor stays on it when rows are added above or re-sorted. */
   cursorKey?: string
+  /** The focus picker's pinned projects, before focus starts. */
+  picked?: string[]
 }
 
 export type Action =
@@ -26,7 +28,8 @@ export type Action =
   | { do: 'todo-done'; id: string }
   | { do: 'arm-toggle' } | { do: 'focus-start' } | { do: 'focus-end' } | { do: 'transitions' }
   | { do: 'focus-project'; project: string } | { do: 'mute'; session: string } | { do: 'phone'; page: Omit<Page, 'cursor' | 'top'> }
-  | { do: 'todo-top'; id: string } | { do: 'back' } | { do: 'none' }
+  | { do: 'todo-top'; id: string } | { do: 'pick'; project: string } | { do: 'focus-go'; minutes: 25 | 50 | null }
+  | { do: 'back' } | { do: 'none' }
 
 export interface Row {
   key: string
@@ -158,12 +161,18 @@ export function todoMenu(t: { id: string; project: string }): Menu {
   ]
 }
 
-/** The menu a list page declares: the union of its rows' menus, deduplicated by id. */
-function listMenu(rows: Row[], fallback: Menu): Menu {
-  const seen = new Map<number, MenuItem>()
-  for (const row of rows) for (const item of row.menu ?? []) if (!seen.has(item.id)) seen.set(item.id, item)
-  return seen.size ? [...seen.values()].slice(0, 10) : fallback
+/**
+ * The menu a list page declares. A page's menu is fixed when the page is built, often before its
+ * rows arrive, so it is the row type's menu with the labels only. A selection acts on the
+ * highlighted row's own copy of the item (main.ts, menuAction), which knows the row.
+ */
+function listMenu(rowMenu: Menu): Menu {
+  return rowMenu.map(item => ({ ...item, action: { do: 'none' } as Action }))
 }
+const SESSION_ROWS = listMenu(sessionMenu({ id: '', project: '' }))
+const RUN_ROWS = listMenu(runMenu({ id: '', session: '', project: '' }))
+const PROJECT_ROWS = listMenu(projectMenu({ id: '' }))
+const TODO_ROWS = listMenu(todoMenu({ id: '', project: '' }))
 
 // ---- status bar ---------------------------------------------------------------------------------
 
@@ -246,8 +255,18 @@ function todoRow(t: Todo): Row {
   return { key: t.id, cols: [{ text: t.project_name, x: 0 }, { text: t.text, x: 110 }], open: open('todo', t.project, t.id, 'TO-DO'), menu: todoMenu(t) }
 }
 
-function focusRow(p: Project): Row {
-  return { key: p.id, cols: [{ text: p.pinned ? '●' : '○', x: 0 }, { text: p.name, x: 22 }], open: { do: 'focus-project', project: p.id } }
+function focusRows(projects: Project[], picked: string[], focus: DeckCounts['focus'] | undefined): Row[] {
+  const rows: Row[] = projects.map(p => ({ key: p.id, cols: [{ text: picked.includes(p.id) ? '●' : '○', x: 0 }, { text: p.name, x: 22 }],
+    open: { do: 'pick', project: p.id } }))
+  if (picked.length) {
+    const what = picked.map(id => projects.find(p => p.id === id)?.name ?? id).join('+')
+    for (const minutes of [25, 50, null] as const) {
+      rows.push({ key: `go:${minutes}`, cols: [{ text: `Start ${what}`, x: 0 }, { text: minutes ? `${minutes} min` : 'no timer', x: 300 }],
+        open: { do: 'focus-go', minutes } })
+    }
+  }
+  if (focus) rows.push({ key: 'end', cols: [{ text: `End focus on ${focus.projects.join('+')}`, x: 0 }], open: { do: 'focus-end' } })
+  return rows
 }
 
 function capped(rows: Row[], more: number, what: string): Row[] {
@@ -280,24 +299,24 @@ export function listScreen(stack: Page[], d: Data): ListScreen {
     }
     case 'needs': {
       const rows = capped((d.needs?.items ?? []).map(needRow), d.needs?.more ?? 0, 'items')
-      return { ...base, rows, hint: 'tap open · 2× back · hold actions', menu: listMenu(rows, [{ id: 50, name: 'Open on phone', action: phone('needs', page.scope) }]),
+      return { ...base, rows, hint: 'tap open · 2× back · hold actions', menu: SESSION_ROWS,
         empty: d.needs ? 'Nothing needs you.' : 'Loading…' }
     }
     case 'sessions': {
       const rows = capped((d.sessions?.items ?? []).filter(s => !s.muted).map(sessionRow), d.sessions?.more ?? 0, 'sessions')
-      return { ...base, rows, hint: 'tap open · 2× back · hold actions', menu: listMenu(rows, [{ id: 10, name: 'Open on phone', action: phone('sessions', page.scope) }]),
+      return { ...base, rows, hint: 'tap open · 2× back · hold actions', menu: SESSION_ROWS,
         empty: d.sessions ? 'No sessions.' : 'Loading…' }
     }
     case 'running': {
       const rows = capped((d.runs?.items ?? []).map(runRow), d.runs?.more ?? 0, 'runs')
       const count = d.runs ? d.runs.items.length + d.runs.more : 0
       const labelled = { ...base, crumb: crumb([...stack.slice(0, -1), { ...page, label: `RUNNING · ${count}` }]) }
-      return { ...labelled, rows, hint: 'oldest first · tap open · 2× back', menu: listMenu(rows, [{ id: 21, name: 'Open on phone', action: phone('running', page.scope) }]),
+      return { ...labelled, rows, hint: 'oldest first · tap open · 2× back', menu: RUN_ROWS,
         empty: d.runs ? 'Nothing running.' : 'Loading…' }
     }
     case 'projects': {
       const rows = (d.projects?.items ?? []).map(projectRow)
-      return { ...base, rows, hint: 'tap open · 2× back · hold actions', menu: listMenu(rows, [{ id: 32, name: 'Open on phone', action: phone('projects', 'all') }]),
+      return { ...base, rows, hint: 'tap open · 2× back · hold actions', menu: PROJECT_ROWS,
         empty: d.projects ? 'No projects configured.' : 'Loading…' }
     }
     case 'todos': {
@@ -307,12 +326,16 @@ export function listScreen(stack: Page[], d: Data): ListScreen {
       const rows = capped(items.map(todoRow), d.todos?.more ?? 0, 'to-dos')
       const open_ = d.todos ? d.todos.items.length + d.todos.more : 0
       const labelled = { ...base, crumb: crumb([...stack.slice(0, -1), { ...page, label: `TO-DOS · ${open_} open` }]) }
-      return { ...labelled, rows, hint: 'tap open · 2× back · hold actions', menu: listMenu(rows, [{ id: 42, name: 'Open on phone', action: phone('todos', page.scope) }]),
+      return { ...labelled, rows, hint: 'tap open · 2× back · hold actions', menu: TODO_ROWS,
         empty: d.todos ? 'No open to-dos.' : 'Loading…' }
     }
     case 'focus': {
-      const rows = (d.projects?.items ?? []).filter(p => p.id !== '(other)').map(focusRow)
-      return { ...base, rows, hint: 'tap pin (max 2) · 2× back', menu: [], empty: d.projects ? 'No projects configured.' : 'Loading…' }
+      const projects = (d.projects?.items ?? []).filter(p => p.id !== '(other)')
+      const picked = page.picked ?? (d.rootDeck?.focus?.projects ?? [])
+      const rows = d.projects ? focusRows(projects, picked, d.rootDeck?.focus) : []
+      const note = picked.length >= 2 ? 'two pinned: unpin one to pick another' : ''
+      // Long-press is disabled here: an empty menu still claims it from the OS.
+      return { ...base, rows, note, hint: 'tap pin (max 2) · 2× back', menu: [], empty: d.projects ? 'No projects configured.' : 'Loading…' }
     }
   }
 }

@@ -73,6 +73,20 @@ test('menus stay inside the SDK limits on every screen', () => {
   assert.deepEqual(DECK_MENU.map(m => m.name), ['Arm / Disarm', 'Start focus', 'End focus', 'Transitions on / off'])
 })
 
+test('a list declares the same menu before and after its rows arrive', () => {
+  // The menu is fixed when the page is built, which is usually before the data comes back.
+  for (const kind of ['sessions', 'running', 'projects', 'todos', 'needs'] as const) {
+    const stack = [page('deck', 'focus', undefined, 'DECK'), page(kind)]
+    const before = listScreen(stack, data()).menu.map(m => `${m.id}:${m.name}`)
+    const after = listScreen(stack, data({ sessions: { items: [session(0)], more: 0 }, runs: { items: [run(0)], more: 0 },
+      projects: { items: [{ id: 'p', name: 'p', branch: '', dirty: 0, pinned: false, counts: { sessions: 0, running: 0, waiting: 0, todos_open: 0 } }], more: 0 },
+      todos: { items: [{ id: 't', project: 'p', project_name: 'p', text: 't', source: 'todo-file', file: 'TODO.md', done: false }], more: 0 },
+      needs: { items: [], more: 0 } })).menu.map(m => `${m.id}:${m.name}`)
+    assert.deepEqual(after, before, kind)
+    assert.ok(before.length > 1, `${kind} has its row type's actions`)
+  }
+})
+
 test('the deck shows focus in the status bar and the outside-focus line', () => {
   const s = listScreen([page('deck', 'focus', undefined, 'DECK')], data({ deck }))
   assert.equal(s.note, 'outside focus: 3 active, 1 waiting')
