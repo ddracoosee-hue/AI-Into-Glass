@@ -390,11 +390,15 @@ class Deck:
     def _failure(self, sess, run, detail: str) -> None:
         sess["counts"]["failed"] += 1
         sess["error"] = True
-        error = {"id": f"err_{self.seq + 1}", "session": sess["id"], "agent": sess["agent"], "project": sess["project"],
+        error = {"id": self._error_id(), "session": sess["id"], "agent": sess["agent"], "project": sess["project"],
                  "tool": run["tool"] if run else "", "target": run["target"] if run else "", "run": run["id"] if run else None,
                  "kind": "tool", "detail": detail, "at": iso(self.now())}
         self.errors.appendleft(error)
         self.emit("error", **self._error_fields(error))
+
+    def _error_id(self) -> str:
+        # Unique across relay restarts: the glasses remember which failures they opened.
+        return f"err_{int(self.now() * 1000):x}{self.seq + 1:x}"
 
     @staticmethod
     def _error_fields(error: dict) -> dict:
@@ -473,7 +477,7 @@ class Deck:
         sess["current"] = None
         if failed:
             sess["error"] = True
-            error = {"id": f"err_{self.seq + 1}", "session": sess["id"], "agent": sess["agent"], "project": sess["project"],
+            error = {"id": self._error_id(), "session": sess["id"], "agent": sess["agent"], "project": sess["project"],
                      "tool": "", "target": "", "run": None, "kind": "stop", "detail": failed, "at": iso(t)}
             self.errors.appendleft(error)
             self.emit("error", **self._error_fields(error))
