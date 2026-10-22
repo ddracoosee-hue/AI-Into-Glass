@@ -67,6 +67,7 @@ class Run:
 
     def __init__(self, name: str):
         self.name, self.failures = name, []
+        self.expected: list[str] = []  # console errors a run provokes on purpose (the simulator logs every non-2xx fetch)
         self.seen = max((e["id"] for e in console()), default=0)
         SHOTS.mkdir(parents=True, exist_ok=True)
 
@@ -74,7 +75,8 @@ class Run:
         fresh = [e for e in console() if e["id"] > self.seen]
         for e in fresh:
             if e["level"] == "error" or e["message"].startswith(("[uncaught]", "[unhandledrejection]")):
-                self.failures.append(f"console error: {e['message'][:160]}")
+                if not any(re.search(p, e["message"]) for p in self.expected):
+                    self.failures.append(f"console error: {e['message'][:160]}")
         return fresh
 
     def expect(self, pattern: str, timeout: float = 6.0) -> str | None:
@@ -335,12 +337,54 @@ def run_tick() -> None:
     run.finish()
 
 
+TODO_COPY = "# TODO\n\n- [ ] README threat model\n- [ ] record demo, rm -r build step\n- [x] ship v1\n"
+
+
+def run_todo() -> None:
+    """Phase D: tap, tap marks a to-do done, flipping exactly one line of a test copy of TODO.md.
+    If the line is edited first, the relay answers 409 and the file keeps only that edit."""
+    run = Run("todo")
+    todo_file = Path("C:/deck-sandbox/glasses/TODO.md")
+    todo_file.write_bytes(TODO_COPY.encode())
+    target = next(t for t in deck_get("/todos?scope=glasses")["items"] if t["text"] == "README threat model")
+    at_root(run)
+    run.goto("todos")
+    run.do("click", r"page todos:focus: depth 2", pause=1.6)
+    run.goto(target["id"])
+    run.do("click", rf"page todo:glasses:{target['id']} depth 3", pause=1.6)
+    run.shot("0-todo")
+    run.do("click", rf"\[deck\] todo {target['id']} done", pause=0.3)
+    run.shot("1-done")
+    after = todo_file.read_bytes().decode()
+    flipped = TODO_COPY.replace("- [ ] README threat model", "- [x] README threat model")
+    print(f"  {'ok  ' if after == flipped else 'FAIL'}  TODO.md: exactly one line flipped to [x]")
+    if after != flipped:
+        run.failures.append(f"TODO.md after done: {after!r}")
+    run.expect(r"page todos:focus: depth 2", 4)  # DONE shows, then the list comes back
+
+    todo_file.write_bytes(TODO_COPY.encode())  # the same line again, so the same id
+    time.sleep(2.5)
+    run.goto(target["id"])
+    run.do("click", rf"page todo:glasses:{target['id']} depth 3", pause=1.6)
+    run.expected.append(rf"^\[fetch\] 409 Conflict http://127\.0\.0\.1:8797/todos/{target['id']}/done$")
+    edited = TODO_COPY.replace("README threat model", "README threat model (edited)")
+    todo_file.write_bytes(edited.encode())  # someone edits the line before the second tap
+    run.do("click", rf"\[deck\] todo {target['id']} changed", pause=0.8)
+    run.shot("2-changed")
+    unchanged = todo_file.read_bytes().decode() == edited
+    print(f"  {'ok  ' if unchanged else 'FAIL'}  409: TODO.md has only the outside edit")
+    if not unchanged:
+        run.failures.append("TODO.md changed after a 409")
+    todo_file.write_bytes(TODO_COPY.encode())
+    run.finish()
+
+
 def main() -> None:
     if len(sys.argv) < 2 or sys.argv[1] not in (*ACTIONS, "shot", "console", "run"):
         sys.exit(__doc__)
     cmd = sys.argv[1]
     if cmd == "run":
-        scenarios = {"walk": run_walk, "interrupt": run_interrupt, "running": run_running, "since": run_since, "tick": run_tick}
+        scenarios = {"walk": run_walk, "interrupt": run_interrupt, "running": run_running, "since": run_since, "tick": run_tick, "todo": run_todo}
         if len(sys.argv) < 3 or sys.argv[2] not in scenarios:
             sys.exit(f"run one of: {', '.join(scenarios)}")
         return scenarios[sys.argv[2]]()

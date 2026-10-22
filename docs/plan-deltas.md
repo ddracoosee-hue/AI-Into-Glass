@@ -103,3 +103,12 @@ still hold. [contract.md](../contract.md), "Contract v2", is the source of truth
 | C7 | Phase C acceptance with Codex live | `sim.py run running` runs Codex with `-s danger-full-access` | Codex's sandbox can't start while the Codex desktop app is open (A7). The prompt is fixed and the repo is throwaway |
 
 Simulator runs added: `sim.py run running` (live agents), `run tick` and `run since`.
+
+## Phase D: projects and to-dos
+
+| # | The plan said | The code does | Why |
+|---|---|---|---|
+| D1 | To-do menu: "Move to top" | Reorders the list on the glasses only, kept in plugin storage. Files never change | The closed write list has exactly one to-do write, done |
+| D2 | `todo.id` is a hash of the file and the line text | A hash of project, file, line text and occurrence number | Two identical lines in one file would otherwise share an id, and "done" has to flip exactly one |
+| D3 | (Tap, tap) | The to-do screen keeps the last copy it read, even after the line changes on disk. The second tap still goes to the relay, which answers 409, and the screen says CHANGED ON DISK | The glasses never decide on their own that a file changed. The relay's hash check is the only judge |
+| D4 | (Zero console errors) | Simulator runs fail on any console error except the ones a run provokes on purpose, each listed in the run by its exact message | evenhub-simulator logs every non-2xx fetch as an error, including the 409 that Phase D's acceptance asks for |
