@@ -9,6 +9,12 @@ import {
 } from './screens.ts'
 import { mountPhone, type Frame } from './phone.ts'
 import { bar, columns, fit } from './text.ts'
+import type { DeckHandle, Route } from '../../web/deck-ui.js'
+
+// The Command Deck phone page is off unless the build turns it on (VITE_DECK_PHONE=1): the phone
+// becomes a readable map of your work, so public builds leave it out.
+const PHONE_DECK = import.meta.env.VITE_DECK_PHONE === '1'
+let phoneDeck: DeckHandle | null = null
 
 const POLL_MS = 2000
 const RESULT_MS = 1500
@@ -98,12 +104,20 @@ interface Prompt {
 }
 
 const root = (): Page => ({ kind: 'deck', scope: 'focus', label: 'DECK', cursor: 0, top: 0 })
+
+/** A glasses page as a route of the shared web UI (web/deck-ui.js). */
+function routeOf(p: Pick<Page, 'kind' | 'scope' | 'id'>): Route {
+  if (p.kind === 'project') return { view: 'project', id: p.scope, scope: p.scope }
+  if (p.kind === 'since') return { view: 'deck', scope: 'focus' }
+  return { view: p.kind, scope: p.scope, id: p.id }
+}
 let stack: Page[] = [root()]
 let message: 'unpaired' | 'offline' | null = client ? null : 'unpaired'
 let prompt: Prompt | null = null
 let result: { text: string; until: number } | null = null
 let summary: { s: FocusSummary; until: number } | null = null
 let focusSince: string | null = null // started_at of the focus block the last poll saw
+let lastCounts = ''
 let latest: Poll | null = null
 let rootDeck: DeckCounts | undefined
 const cache = new Map<string, Partial<Data> & { at: number }>()
@@ -248,6 +262,8 @@ function render(): void {
   if (id !== view.id) {
     view = { id, shownAt: now() } // a new screen: taps are locked out for GRACE_MS
     gestures.cancelTap()
+    // The presenter view (/present) follows the glasses page by page. Overlays don't move it.
+    if (!/^(prompt|result|message|summary):/.test(paint.key)) client?.view(routeOf(top())).catch(() => {})
   }
   glasses.show(paint)
   const s = paint.slots
@@ -332,6 +348,9 @@ async function poll(): Promise<void> {
       if (last_summary) showSummary(last_summary)
     }
     focusSince = rootDeck.focus?.started_at ?? null
+    const counts = JSON.stringify({ needs: rootDeck.needs_you, sessions: rootDeck.sessions, running: rootDeck.running,
+      projects: rootDeck.projects, todos: rootDeck.todos_open })
+    if (counts !== lastCounts) console.debug('[deck] counts', (lastCounts = counts)) // the sim runs compare these with the desktop page
     await sinceYouLooked(rootDeck.cursor)
     saveLooked(rootDeck.cursor)
     const current = top()
@@ -494,8 +513,15 @@ async function act(action: Action | undefined): Promise<void> {
       todoTop = [action.id, ...todoTop.filter(t => t !== action.id)].slice(0, 50)
       void store(KEY_TODO_TOP, JSON.stringify(todoTop))
       return render()
-    case 'phone': case 'none':
-      console.log('[deck] action not built yet:', action.do)
+    case 'phone': {
+      // The phone page shares this WebView, so "Open on phone" just routes it.
+      const route = routeOf(action.page)
+      if (!phoneDeck) return console.log('[deck] phone page is off in this build')
+      console.log('[deck] phone route', JSON.stringify(route))
+      return void phoneDeck.go(route)
+    }
+    case 'none':
+      return
   }
 }
 
@@ -561,6 +587,7 @@ const gestures = createGestures(() => view, {
   },
   foreground(entered) {
     foreground = entered
+    phoneDeck?.setBlank(!entered)
     // Back in front: anything shown before is stale. Ask the relay again now.
     // HARDWARE: FOREGROUND_ENTER after a real background is unverified (see gestures.ts).
     if (entered) void poll()
@@ -606,6 +633,19 @@ mirror = mountPhone(document.querySelector<HTMLDivElement>('#app')!, {
     await setArmed(false, 'phone')
   },
 }, await load(KEY_RELAY))
+
+if (PHONE_DECK) {
+  const { mountDeck } = await import('../../web/deck-ui.js')
+  await import('../../web/deck-ui.css')
+  const slot = document.querySelector<HTMLElement>('#deckPhone')!
+  slot.hidden = false
+  phoneDeck = mountDeck(slot, {
+    get: path => (client ? client.get(path) : Promise.reject(new Error('not paired'))),
+    events: (since, wait) => (client ? client.events(since, wait) : Promise.reject(new Error('not paired'))),
+  }, { hidePaths: true, title: 'Command Deck' })
+  // Blank whenever the page is out of sight, so a glance at an unlocked phone shows nothing.
+  document.addEventListener('visibilitychange', () => phoneDeck?.setBlank(document.hidden))
+}
 
 render()
 void poll()

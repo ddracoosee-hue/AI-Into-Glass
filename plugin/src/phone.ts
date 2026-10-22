@@ -28,6 +28,7 @@ export function mountPhone(root: HTMLElement, handlers: PhoneHandlers, relay: st
       </section>
       <p class="note">Mirror of the glasses. Approve and deny on the glasses: tap approves, double-tap denies.</p>
       <div class="actions"><button class="danger" id="disarm">Disarm gate</button></div>
+      <section id="deckPhone" aria-label="Command Deck" hidden></section>
       <details id="pairing">
         <summary>Pairing</summary>
         <label for="relay">Relay URL</label>

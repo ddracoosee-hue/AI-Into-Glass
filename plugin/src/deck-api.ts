@@ -149,6 +149,9 @@ export interface SessionDetail extends Session {
 const q = (scope: string) => `scope=${encodeURIComponent(scope)}`
 
 export class DeckClient extends RelayClient {
+  /** Any v2 read, for the phone page's shared UI (web/deck-ui.js). */
+  get = (path: string) => this.read<unknown>(path)
+
   private async read<T>(path: string): Promise<T> {
     const res = await this.call('GET', path)
     if (res.status !== 200) throw new Error(`relay answered ${res.status} for ${path}`)
@@ -175,11 +178,16 @@ export class DeckClient extends RelayClient {
   }
 
   /** Events after `since`, without waiting. `reset` means the relay's log started over. */
-  async events(since: number): Promise<{ events: DeckEvent[]; cursor: number; reset: boolean }> {
-    const res = await this.call('GET', `/events?since=${since}&wait=0`)
+  async events(since: number, wait = 0): Promise<{ events: DeckEvent[]; cursor: number; reset: boolean }> {
+    const res = await this.call('GET', `/events?since=${since}&wait=${wait}`, undefined, false, (wait + 5) * 1000)
     if (res.status === 204) return { events: [], cursor: Number(res.headers.get('X-Deck-Cursor') ?? since), reset: false }
     if (res.status !== 200) throw new Error(`relay answered ${res.status}`)
     return res.json()
+  }
+
+  /** Tell the relay which page the glasses show, so the presenter view can follow. Display only. */
+  async view(route: { view: string; scope?: string; id?: string }): Promise<void> {
+    await this.call('POST', '/view', { route })
   }
 
   async mute(session: string, muted: boolean): Promise<void> {
