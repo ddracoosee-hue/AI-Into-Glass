@@ -75,3 +75,17 @@ still hold. [contract.md](../contract.md), "Contract v2", is the source of truth
 | A9 | Endpoints for Deck, Sessions, Running, Projects, To-dos | Adds `GET /needs?scope=` | The Needs-you section needs a list, which the endpoint table had no row for. |
 | A10 | (Run lifecycle) | A permission still `waiting` when the same thread asks for another tool closes as `ended` | No hook reports a deny given in the terminal. An approved tool posts PostToolUse before its thread asks for anything else, so a new PreToolUse means the prompt was answered. A late PostToolUse corrects the inference. |
 | A11 | Nothing absolute leaves the PC | True for every v2 endpoint. v1's `/pending` still carries `session.cwd` as the hook sends it: home becomes `~`, but other drives stay absolute (`H:/glasses`) | v1 is frozen, and the plugin never displays `cwd`. |
+
+## Phase B: navigation engine
+
+| # | The plan said | The code does | Why |
+|---|---|---|---|
+| B1 | List template: a firmware list container, "swipe moves the highlight (firmware-native)" | Lists are five text rows. The plugin owns the cursor, marks the highlighted row with › at full brightness, and dims the rest. A swipe is two `textContainerUpgrade` calls | A probe showed that a firmware list sends no event when the highlight moves, and resets to row 0 on every rebuild, with no API to set it. The plugin couldn't know the highlighted row, so it couldn't return to it after an interrupt, or point a long-press menu at it. Both are acceptance criteria. HARDWARE #3 |
+| B2 | "List screens: long-press opens the actions menu for the highlighted item" | Each list page declares the union of its row menus. A selection acts on the row under the plugin's cursor | Menus change only on rebuild, and a cursor move isn't a rebuild |
+| B3 | ▸ marks the highlighted row | › | The firmware font has no ▸; it renders blank. ● ○ › · … × → all render |
+| B4 | Status bar: one container | One container, breadcrumb left and status right, aligned by measured spaces (5 px each) | It keeps the List template at 8 text containers: bar, five rows, the dim note line, hint |
+| B5 | The "v1 approval layout plus a source line" | The source line reads `from <session> · back to <where you were>` | It names who's asking and where tap or double-tap returns you |
+| B6 | Gate off: tap arms (v1) | The Deck is the root. Arm and disarm are in its long-press menu, and the status bar shows ARMED or OFF | On the Deck, tap opens the highlighted section, as on every list |
+| B7 | (Tap timing) | Every tap waits out the 0.35 s double-tap window, and every screen has the 0.7 s lockout | A double-tap that the touchpad reports as tap + double must go back, not open and then go back |
+| B8 | (Simulator lifecycle) | A FOREGROUND_ENTER while already in front counts as "menu opened", and the EXIT after it as "menu closed" | evenhub-simulator sends 4 and 5 when the contextual menu opens and closes. Taken literally, closing a menu would stop polling. HARDWARE #5 |
+| B9 | `scripts/sim.py run` | `python scripts/sim.py run walk` and `run interrupt`, on the stack from `scripts/devstack.py up && seed` | devstack keeps its state in `C:/deck-sandbox/state`, so test runs never touch your paired devices or `gate.log` |
