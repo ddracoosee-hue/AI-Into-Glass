@@ -370,7 +370,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         url = urlparse(self.path)
         path = url.path
-        if self.relay.deck and path.startswith(("/todos/", "/sessions/")):
+        if self.relay.deck and (path.startswith(("/todos/", "/sessions/")) or path == "/view"):
             return None if deck_api.handle(self, "POST", path, url.query) else self.reply(404, {"error": "not found"})
         body = self.read_json()
         if path == "/requests":
@@ -428,6 +428,12 @@ def make_server(home: Path, host: str = "127.0.0.1", port: int = 8797, cors_orig
     return Server((host, port), handler), relay
 
 
+def make_desktop_server(relay: Relay, port: int = 8799) -> Server:
+    """The desktop page and presenter view, loopback only and read-only."""
+    handler = type("BoundDesktop", (deck_api.DesktopHandler,), {"relay": relay})
+    return Server(("127.0.0.1", port), handler)
+
+
 def make_ingest_server(relay: Relay, port: int = 8798) -> Server:
     """Loopback only, always: `tailscale serve` publishes 8797, so ingest lives on its own port."""
     handler = type("BoundIngest", (deck_api.IngestHandler,), {"deck": relay.deck, "key": relay.ingest_key})
@@ -441,15 +447,18 @@ def serve(args) -> None:
     projects = Path(args.projects) if args.projects else None
     httpd, relay = make_server(home, args.host, args.port, args.cors_origin, projects=projects)
     ingest = make_ingest_server(relay, args.ingest_port)
+    desktop = make_desktop_server(relay, args.desktop_port)
     url = f"http://{args.host}:{httpd.server_port}"
     ingest_url = f"http://127.0.0.1:{ingest.server_port}/ingest"
     (home / "relay.json").write_text(json.dumps({"url": url, "ingest_url": ingest_url, "pid": os.getpid(), "version": VERSION}))
 
     relay.start_sweeper()
-    threading.Thread(target=ingest.serve_forever, kwargs={"poll_interval": 0.5}, daemon=True).start()
+    for side in (ingest, desktop):
+        threading.Thread(target=side.serve_forever, kwargs={"poll_interval": 0.5}, daemon=True).start()
     append_log(home, "relay_start", url=url, version=VERSION)
     print(f"Approval Gate relay {VERSION} on {url}  (state: {home})", flush=True)
     print(f"Command Deck ingest on {ingest_url} (loopback only; never add it to tailscale serve)", flush=True)
+    print(f"Desktop page on http://127.0.0.1:{desktop.server_port}/ (presenter view: /present)", flush=True)
     if relay.deck.projects.error:
         print(f"Projects config not loaded: {relay.deck.projects.error}", flush=True)
     else:
@@ -461,8 +470,9 @@ def serve(args) -> None:
         pass
     finally:
         relay.stopping.set()
-        ingest.shutdown()
-        ingest.server_close()
+        for side in (ingest, desktop):
+            side.shutdown()
+            side.server_close()
         httpd.server_close()
         set_armed(home, False, "relay", reason="relay stopped")
         (home / "relay.json").unlink(missing_ok=True)
@@ -475,6 +485,7 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8797)
     parser.add_argument("--cors-origin", default="*", help="Access-Control-Allow-Origin (auth is a bearer token, never a cookie)")
     parser.add_argument("--ingest-port", type=int, default=8798, help="Command Deck telemetry, 127.0.0.1 only")
+    parser.add_argument("--desktop-port", type=int, default=8799, help="Command Deck desktop page, 127.0.0.1 only")
     parser.add_argument("--projects", help="deck.projects.json (default: the one in the state dir)")
     serve(parser.parse_args())
 

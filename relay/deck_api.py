@@ -10,6 +10,7 @@ import json
 import re
 import time
 from http.server import BaseHTTPRequestHandler
+from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from deck import Deck, OTHER
@@ -64,14 +65,21 @@ def scope_of(deck: Deck, query: dict) -> str | None:
     return None
 
 
-def handle(h, method: str, path: str, query: str) -> bool:
-    """Serve a v2 endpoint on the phone API. False if `path` isn't one, so the caller answers 404."""
+def handle(h, method: str, path: str, query: str, desktop: bool = False) -> bool:
+    """Serve a v2 endpoint. False if `path` isn't one, so the caller answers 404.
+
+    On the phone API a paired device token is required. `desktop` is the loopback desktop page:
+    no token, reads only, and waiting on /events never counts as a device watching, so an open
+    desktop tab can't make the gate send prompts to glasses nobody is wearing."""
     deck: Deck = h.relay.deck
     q = parse_qs(query)
     parts = [unquote(p) for p in path.strip("/").split("/")]
-    if not parts or parts[0] not in ("deck", "needs", "sessions", "runs", "projects", "todos", "focus", "events"):
+    if not parts or parts[0] not in ("deck", "needs", "sessions", "runs", "projects", "todos", "focus", "events", "view"):
         return False
-    if not h.device():
+    if desktop and method != "GET":
+        h.reply(405, {"error": "the desktop page is read-only"})
+        return True
+    if not desktop and not h.device():
         h.reply(401, {"error": "unauthorized"})
         return True
     route = (method, parts[0], len(parts))
@@ -111,6 +119,9 @@ def handle(h, method: str, path: str, query: str) -> bool:
     elif route == ("POST", "todos", 3) and parts[2] == "done":
         done = deck.mark_todo(parts[1])
         h.reply(200, done) if done else h.reply(409, {"error": "not an open line in a configured to-do file, or it changed"})
+    elif route == ("POST", "view", 1):
+        shown = deck.view((h.read_json() or {}).get("route"))
+        h.reply(200, {"route": shown}) if shown else h.reply(400, {"error": "route must name a deck view"})
     elif route == ("GET", "focus", 1):
         h.reply(200, {"focus": deck.public_focus(), "last_summary": deck.last_summary})
     elif route == ("PUT", "focus", 1):
@@ -128,10 +139,11 @@ def handle(h, method: str, path: str, query: str) -> bool:
             return True
 
         def alive() -> bool:
-            h.relay.touch()  # a device waiting on events is a device watching
+            if not desktop:
+                h.relay.touch()  # a device waiting on events is a device watching
             return not h.client_gone()
 
-        h.relay.touch()
+        alive()
         events, cursor, reset = deck.events_since(since, wait, alive)
         if events or reset:
             h.reply(200, {"events": events, "cursor": cursor, "reset": reset})
@@ -140,6 +152,79 @@ def handle(h, method: str, path: str, query: str) -> bool:
     else:
         h.reply(405, {"error": "method not allowed"})
     return True
+
+
+WEB = Path(__file__).resolve().parent.parent / "web"
+PAGES = {"/": "index.html", "/present": "present.html"}
+STATIC = {"deck-ui.js": "text/javascript; charset=utf-8", "deck-ui.css": "text/css; charset=utf-8",
+          "desktop.js": "text/javascript; charset=utf-8", "present.js": "text/javascript; charset=utf-8",
+          "favicon.svg": "image/svg+xml"}
+DESKTOP_HOSTS = ("127.0.0.1", "localhost")
+SECURITY_HEADERS = {
+    "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; "
+                               "frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+    "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "Cache-Control": "no-store",
+}
+
+
+class DesktopHandler(BaseHTTPRequestHandler):
+    """The desktop page on 127.0.0.1:8799: the web UI plus /api/* reads, no token.
+
+    It is loopback-only and read-only. A Host header that isn't this machine's loopback name is
+    refused, so a web page can't reach it through DNS rebinding, and there are no CORS headers, so
+    another origin can't read its answers."""
+    relay = None  # set by relay.make_desktop_server
+    server_version = "CommandDeckDesktop/2"
+
+    def log_message(self, *args) -> None:
+        pass
+
+    def reply(self, code: int, body: dict | None = None, headers: dict | None = None) -> None:
+        self.send_bytes(code, b"" if body is None else json.dumps(body, ensure_ascii=False).encode(),
+                        "application/json; charset=utf-8", headers)
+
+    def send_bytes(self, code: int, data: bytes, ctype: str, headers: dict | None = None) -> None:
+        try:
+            self.send_response(code)
+            for k, v in {**SECURITY_HEADERS, **(headers or {})}.items():
+                self.send_header(k, v)
+            if code != 204:
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except OSError:
+            pass
+
+    def client_gone(self) -> bool:
+        import select
+        import socket
+        try:
+            readable, _, _ = select.select([self.connection], [], [], 0)
+            return bool(readable) and self.connection.recv(1, socket.MSG_PEEK) == b""
+        except OSError:
+            return True
+
+    def do_GET(self) -> None:
+        host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]")
+        if host not in DESKTOP_HOSTS:
+            return self.reply(403, {"error": "open the desktop page at http://127.0.0.1:8799/"})
+        url = urlparse(self.path)
+        if url.path.startswith("/api/") and handle(self, "GET", url.path[4:], url.query, desktop=True):
+            return None
+        name = PAGES.get(url.path) or (url.path[1:] if url.path[1:] in STATIC else None)
+        if name is None:
+            return self.reply(404, {"error": "not found"})
+        try:
+            data = (WEB / name).read_bytes()
+        except OSError:
+            return self.reply(404, {"error": "not found"})
+        self.send_bytes(200, data, "text/html; charset=utf-8" if name.endswith(".html") else STATIC[name])
+
+    def do_POST(self) -> None:
+        self.reply(405, {"error": "the desktop page is read-only"})
+
+    do_PUT = do_DELETE = do_POST
 
 
 class IngestHandler(BaseHTTPRequestHandler):

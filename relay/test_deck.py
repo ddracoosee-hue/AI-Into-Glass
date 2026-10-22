@@ -337,6 +337,60 @@ class Mute(HttpBase):
         self.assertEqual((run["target"], run["status"]), ("git push origin main", "waiting"))
 
 
+class Desktop(HttpBase):
+    """127.0.0.1:8799: the web UI and read-only /api, for this machine's browser only."""
+
+    def setUp(self):
+        super().setUp()
+        self.desktop = R.make_desktop_server(self.relay, port=0)
+        threading.Thread(target=self.desktop.serve_forever, daemon=True).start()
+        self.dbase = f"http://127.0.0.1:{self.desktop.server_port}"
+
+    def tearDown(self):
+        self.desktop.shutdown()
+        self.desktop.server_close()
+        super().tearDown()
+
+    def test_pages_and_reads_without_a_token(self):
+        for path, kind in (("/", "text/html"), ("/present", "text/html"), ("/deck-ui.js", "text/javascript"), ("/deck-ui.css", "text/css")):
+            with urllib.request.urlopen(self.dbase + path, timeout=5) as resp:
+                self.assertEqual((resp.status, resp.headers["Content-Type"].split(";")[0]), (200, kind), path)
+                self.assertIn("script-src 'self'", resp.headers["Content-Security-Policy"])
+                self.assertIsNone(resp.headers.get("Access-Control-Allow-Origin"))
+        for event in fixtures("claude-code", (REC, self.root))[:4]:
+            self.post("claude-code", event)
+        status, body = self.call("GET", self.dbase + "/api/sessions")
+        self.assertEqual((status, json.loads(body)["items"][0]["id"]), (200, CC_SESSION))
+
+    def test_read_only_and_loopback_names_only(self):
+        for method in ("POST", "PUT", "DELETE"):
+            self.assertEqual(self.call(method, self.dbase + "/api/focus", body={"projects": ["rec"], "minutes": 25})[0], 405)
+        self.assertEqual(self.call("POST", f"{self.dbase}/api/todos/{'0' * 20}/done")[0], 405)
+        req = urllib.request.Request(self.dbase + "/api/deck", headers={"Host": "attacker.example:8799"})
+        with self.assertRaises(urllib.error.HTTPError) as err:
+            urllib.request.urlopen(req, timeout=5)
+        self.assertEqual(err.exception.code, 403)  # DNS rebinding: a foreign Host is refused
+        for path in ("/../relay/relay.py", "/relay.py", "/web/deck-ui.js", "/%2e%2e/contract.md"):
+            self.assertEqual(self.call("GET", self.dbase + path)[0], 404, path)
+
+    def test_a_desktop_tab_never_counts_as_watching(self):
+        self.relay.last_poll = float("-inf")
+        self.call("GET", self.dbase + "/api/events?since=0&wait=1")
+        self.assertFalse(self.relay.watched)
+        self.get("/events?since=0&wait=0")  # a paired device does count
+        self.assertTrue(self.relay.watched)
+
+    def test_view_is_device_only_and_never_logged(self):
+        route = {"view": "sessions", "scope": "rec"}
+        self.assertEqual(self.call("POST", self.base + "/view", self.relay.hook_key, {"route": route})[0], 401)
+        self.assertEqual(self.call("POST", self.base + "/view", DEVICE_TOKEN, {"route": {"view": "rm -rf"}})[0], 400)
+        self.assertEqual(self.call("POST", self.base + "/view", DEVICE_TOKEN, {"route": route})[0], 200)
+        self.assertEqual(self.call("POST", self.base + "/view", DEVICE_TOKEN, {"route": route})[0], 200)  # same page: one event
+        views = [e for e in self.get("/events?since=0")[1]["events"] if e["type"] == "view"]
+        self.assertEqual([v["route"] for v in views], [route])
+        self.assertNotIn('"view"', (self.home / "deck.log").read_text(encoding="utf-8") if (self.home / "deck.log").exists() else "")
+
+
 class Upkeep(DeckTest):
     def test_quiet_after_15_minutes_working(self):
         self.replay("claude-code", fixtures("claude-code")[:4])

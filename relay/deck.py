@@ -36,6 +36,7 @@ CARD_TTL, CARD_TTL_MAX = 1800, 86400
 CARD_LEVELS = ("info", "warn", "error")
 SUBAGENT_TOOLS = ("Agent", "Task", "spawn_agent")
 SAFE_ID = re.compile(r"[\w.:-]{1,100}")
+VIEWS = ("deck", "needs", "sessions", "running", "projects", "project", "todos", "focus", "session", "run", "todo", "commits", "card", "error")
 
 _P = r"""[^\s'"`;|&<>(),]"""
 PATH_TOKEN = re.compile(
@@ -181,14 +182,31 @@ class Deck:
                 self.events.append(event)
                 self.seq = max(self.seq, event["id"])
 
-    def emit(self, type_: str, **fields) -> dict:
+    def emit(self, type_: str, persist: bool = True, **fields) -> dict:
         with self.cond:
             self.seq += 1
             event = {**fields, "id": self.seq, "ts": iso(self.now()), "type": type_}
             self.events.append(event)
-            self._write(event)
+            if persist:
+                self._write(event)
             self.cond.notify_all()
             return event
+
+    def view(self, route) -> dict | None:
+        """The page the glasses show, so the presenter view can follow them. Display state only:
+        kept in memory, never in deck.log, and it changes nothing an agent does."""
+        if not isinstance(route, dict) or route.get("view") not in VIEWS:
+            return None
+        clean = {"view": route["view"]}
+        for field in ("scope", "id"):
+            if isinstance(route.get(field), str) and SAFE_ID.fullmatch(route[field].replace("(", "").replace(")", "")):
+                clean[field] = route[field]
+        with self.cond:
+            last = next((e for e in reversed(self.events) if e["type"] == "view"), None)
+            if last and last.get("route") == clean:
+                return clean
+            self.emit("view", persist=False, route=clean)
+            return clean
 
     def _write(self, event: dict) -> None:
         try:
