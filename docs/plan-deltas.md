@@ -89,3 +89,17 @@ still hold. [contract.md](../contract.md), "Contract v2", is the source of truth
 | B7 | (Tap timing) | Every tap waits out the 0.35 s double-tap window, and every screen has the 0.7 s lockout | A double-tap that the touchpad reports as tap + double must go back, not open and then go back |
 | B8 | (Simulator lifecycle) | A FOREGROUND_ENTER while already in front counts as "menu opened", and the EXIT after it as "menu closed" | evenhub-simulator sends 4 and 5 when the contextual menu opens and closes. Taken literally, closing a menu would stop polling. HARDWARE #5 |
 | B9 | `scripts/sim.py run` | `python scripts/sim.py run walk` and `run interrupt`, on the stack from `scripts/devstack.py up && seed` | devstack keeps its state in `C:/deck-sandbox/state`, so test runs never touch your paired devices or `gate.log` |
+
+## Phase C: Sessions, Needs you, Running
+
+| # | The plan said | The code does | Why |
+|---|---|---|---|
+| C1 | Writes are a closed list: approve or deny, arm or disarm, focus, to-do done | The list gains mute: `POST /sessions/{id}/mute {muted}`. A muted session is hidden from the glasses, and its gate requests get `409 muted`, so they go straight to the terminal | "Muting is local … its approvals still go to the terminal". Only the relay can route a request, so the mute has to live there. Muting never approves anything |
+| C2 | The spotlight row is pinned "until opened" | The relay keeps the newest five failures; the plugin remembers which ones it opened | Opening is about what this pair of glasses has seen. The desktop page shows the failures regardless |
+| C3 | (Cursor) | The cursor follows its row's key, not its index | When a failure pins a row above, or a session starts waiting and sorts to the top, the highlight stays on the row you were on |
+| C4 | Since-you-looked cursor in `localStorage` | Bridge storage, with the `deck.*` keys also mirrored to the WebView's own `localStorage` | evenhub-simulator keeps bridge storage in memory, so it is empty after every launch. Its WebView profile persists. The pairing token is not mirrored. HARDWARE #9 |
+| C5 | Running: every open tool call and subagent | Also runs waiting on a permission prompt | They are open runs, and the longest wait is often the one that matters |
+| C6 | Session menu: "Jump to its running tool" | Opens that run's detail page (`session.current.run`), or the Running list when it has none | The relay now names the run in `current` |
+| C7 | Phase C acceptance with Codex live | `sim.py run running` runs Codex with `-s danger-full-access` | Codex's sandbox can't start while the Codex desktop app is open (A7). The prompt is fixed and the repo is throwaway |
+
+Simulator runs added: `sim.py run running` (live agents), `run tick` and `run since`.

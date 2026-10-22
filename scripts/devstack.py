@@ -4,6 +4,9 @@
     python scripts/devstack.py up        # relay (8797 + ingest 8798), Vite (5180), simulator (9898), paired
     python scripts/devstack.py seed      # replay the hook fixtures as live sessions in two projects
     python scripts/devstack.py sim       # restart only the simulator (a fresh plugin at the Deck)
+    python scripts/devstack.py nosim     # close the simulator (nobody watching)
+    python scripts/devstack.py hooks     # project-level gate + telemetry hooks in both projects
+    python scripts/devstack.py reset     # restart the relay with an empty registry and event log
     python scripts/devstack.py down      # stop what `up` started
 
 State lives in C:/deck-sandbox/state (APPROVAL_GATE_HOME), never in %APPDATA%\\approval-gate, so
@@ -84,16 +87,24 @@ def wait_for(url: str, seconds: float = 20) -> bool:
     return False
 
 
-def kill(name: str) -> None:
+def kill(name: str, gentle: bool = False) -> None:
+    """Stop a process `up` started. `gentle` asks its window to close first, so the simulator's
+    WebView flushes localStorage to disk the way a real close does."""
     pids = json.loads(PIDS.read_text()) if PIDS.exists() else {}
     pid = pids.pop(name, None)
     if pid:
+        if gentle:
+            subprocess.run(["taskkill", "/PID", str(pid), "/T"], capture_output=True)
+            for _ in range(30):
+                if str(pid) not in subprocess.run(["tasklist", "/FI", f"PID eq {pid}"], capture_output=True, text=True).stdout:
+                    break
+                time.sleep(0.2)
         subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
     PIDS.write_text(json.dumps(pids))
 
 
 def start_sim() -> None:
-    kill("simulator")
+    kill("simulator", gentle=True)
     link = f"http://127.0.0.1:5180/?relay={quote('http://127.0.0.1:8797', safe='')}&token={token()}"
     spawn("simulator", [str(SIM_EXE), link, "--automation-port", "9898"], ROOT / "plugin")
     if not wait_for("http://127.0.0.1:9898/api/ping"):
@@ -102,14 +113,40 @@ def start_sim() -> None:
 
 def up() -> None:
     prepare()
-    spawn("relay", [sys.executable, str(ROOT / "relay" / "relay.py"), "--projects", str(STATE / "deck.projects.json")], ROOT)
-    if not wait_for("http://127.0.0.1:8797/health"):
-        sys.exit("relay did not start; see C:/deck-sandbox/state/relay.log")
+    start_relay()
     spawn("vite", ["node", str(ROOT / "plugin" / "node_modules" / "vite" / "bin" / "vite.js")], ROOT / "plugin")
     if not wait_for("http://127.0.0.1:5180/"):
         sys.exit("vite did not start; see C:/deck-sandbox/state/vite.log")
     start_sim()
     print("Up: relay 8797 (ingest 8798), vite 5180, simulator 9898. State:", STATE)
+
+
+def start_relay() -> None:
+    kill("relay")
+    spawn("relay", [sys.executable, str(ROOT / "relay" / "relay.py"), "--projects", str(STATE / "deck.projects.json")], ROOT)
+    if not wait_for("http://127.0.0.1:8797/health"):
+        sys.exit("relay did not start; see C:/deck-sandbox/state/relay.log")
+
+
+def reset() -> None:
+    kill("relay")
+    time.sleep(0.5)
+    for name in ("deck.log", "deck.log.1", "focus.json", "armed"):
+        (STATE / name).unlink(missing_ok=True)
+    start_relay()
+    print("Relay restarted with an empty registry.")
+
+
+def hooks() -> None:
+    """The gate and Command Deck telemetry, in each project's own settings. Never global."""
+    install = [sys.executable, str(ROOT / "scripts" / "install_hook.py"), "--deck"]
+    for folder in PROJECTS.values():
+        subprocess.run([*install, "--settings", str(folder / ".claude" / "settings.json")], env=env(), check=True, capture_output=True)
+        subprocess.run([*install, "--codex", "--settings", str(folder / ".codex" / "hooks.json")], env=env(), check=True, capture_output=True)
+        exclude = folder / ".git" / "info" / "exclude"
+        if ".claude/" not in exclude.read_text():
+            exclude.write_text(exclude.read_text() + ".claude/\n.codex/\n")
+    print("Hooks installed in", ", ".join(str(f) for f in PROJECTS.values()))
 
 
 def down() -> None:
@@ -168,6 +205,12 @@ def main() -> None:
         seed()
     elif cmd == "sim":
         start_sim()
+    elif cmd == "nosim":
+        kill("simulator", gentle=True)
+    elif cmd == "hooks":
+        hooks()
+    elif cmd == "reset":
+        reset()
     else:
         sys.exit(__doc__)
 
