@@ -39,7 +39,7 @@ function isPending(value: unknown): value is PendingRequest {
 export class RelayClient {
   constructor(readonly base: string, private readonly token: string) {}
 
-  private async call(method: 'GET' | 'POST', path: string, body?: object, keepalive = false): Promise<Response> {
+  protected async call(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: object, keepalive = false): Promise<Response> {
     const abort = new AbortController()
     const timer = setTimeout(() => abort.abort(), TIMEOUT_MS)
     try {

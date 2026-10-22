@@ -12,7 +12,8 @@
     "simulate": "evenhub-simulator http://127.0.0.1:5180 --automation-port 9898"
   },
   "dependencies": {
-    "@evenrealities/even_hub_sdk": "^0.0.16"
+    "@evenrealities/even_hub_sdk": "^0.0.16",
+    "@evenrealities/pretext": "^0.1.4"
   },
   "devDependencies": {
     "@evenrealities/evenhub-cli": "^0.2.0",

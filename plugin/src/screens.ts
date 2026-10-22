@@ -1,0 +1,375 @@
+// Every glasses screen as data: which template, what each container says, what tap opens and what
+// the long-press menu offers. Pure, so test/screens.test.ts can check rows and limits without a bridge.
+import type { DeckCounts, DeckError, Need, Project, Rows, Run, Session, SessionDetail, Todo } from './deck-api.ts'
+import { ago, bar, columns, fit, SCREEN_W } from './text.ts'
+
+export type Template = 'list' | 'detail' | 'prompt'
+export type ListKind = 'deck' | 'needs' | 'sessions' | 'running' | 'projects' | 'project' | 'todos' | 'focus'
+export type DetailKind = 'session' | 'run' | 'todo' | 'card' | 'commits' | 'error'
+export type PageKind = ListKind | DetailKind
+
+/** One level of the stack. `scope` is all, focus or a project id; `cursor` and `top` belong to lists. */
+export interface Page {
+  kind: PageKind
+  scope: string
+  id?: string
+  label?: string
+  cursor: number
+  top: number
+}
+
+export type Action =
+  | { do: 'open'; page: Omit<Page, 'cursor' | 'top'> }
+  | { do: 'prompt'; request: string }
+  | { do: 'todo-done'; id: string }
+  | { do: 'arm-toggle' } | { do: 'focus-start' } | { do: 'focus-end' } | { do: 'transitions' }
+  | { do: 'focus-project'; project: string } | { do: 'mute'; session: string } | { do: 'phone'; page: Omit<Page, 'cursor' | 'top'> }
+  | { do: 'none' }
+
+export interface Row {
+  key: string
+  cols: { text: string; x: number }[]
+  right?: string
+  open?: Action
+  /** Long-press menu for this row; the menu acts on the highlighted row. */
+  menu?: Menu
+}
+
+export interface MenuItem {
+  id: number
+  name: string // at most 32 UTF-8 bytes (SDK)
+  action: Action
+}
+export type Menu = MenuItem[]
+
+export interface ListScreen {
+  template: 'list'
+  key: string
+  crumb: string
+  status: string
+  rows: Row[]
+  note: string
+  hint: string
+  menu: Menu
+  empty: string
+}
+
+export interface DetailScreen {
+  template: 'detail'
+  key: string
+  crumb: string
+  status: string
+  headline: string
+  body: string
+  hint: string
+  menu: Menu
+  primary?: Action
+}
+
+export type Screen = ListScreen | DetailScreen
+
+export const VISIBLE_ROWS = 5
+export const ROW_W = SCREEN_W - 12 // inner width 572, less a margin: a line that wraps scrolls
+export const GUTTER = 16 // the › marker, then the row
+export const MAX_ROWS = 20 // the glasses list limit; the rest live on the phone
+
+export const AGENT_BADGE: Record<string, string> = { 'claude-code': 'CC', codex: 'CDX' }
+export const AGENT_NAME: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex' }
+
+/** Data the screens read. Every field is optional: a screen draws before its data arrives. */
+export interface Data {
+  deck?: DeckCounts
+  rootDeck?: DeckCounts
+  needs?: Rows<Need>
+  sessions?: Rows<Session>
+  runs?: Rows<Run>
+  projects?: Rows<Project>
+  project?: Project
+  todos?: Rows<Todo>
+  session?: SessionDetail
+  run?: Run
+  todo?: Todo
+  need?: Need
+  error?: DeckError
+  armed: boolean
+  clock: string
+  /** Seconds since `run` was fetched, so ELAPSED can tick between polls. */
+  runAge?: number
+}
+
+const open = (kind: PageKind, scope: string, id?: string, label?: string): Action => ({ do: 'open', page: { kind, scope, id, label } })
+const phone = (kind: PageKind, scope: string, id?: string): Action => ({ do: 'phone', page: { kind, scope, id } })
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+
+// ---- menus (ids are stable per object type; labels never change without a rebuild) --------------
+
+export const DECK_MENU: Menu = [
+  { id: 1, name: 'Arm / Disarm', action: { do: 'arm-toggle' } },
+  { id: 2, name: 'Start focus', action: { do: 'focus-start' } },
+  { id: 3, name: 'End focus', action: { do: 'focus-end' } },
+  { id: 4, name: 'Transitions on / off', action: { do: 'transitions' } },
+]
+
+export function sessionMenu(s: { id: string; project: string }): Menu {
+  return [
+    { id: 10, name: 'Open on phone', action: phone('session', s.project, s.id) },
+    { id: 11, name: 'Focus on its project', action: { do: 'focus-project', project: s.project } },
+    { id: 12, name: 'Mute this session', action: { do: 'mute', session: s.id } },
+    { id: 13, name: 'Jump to its running tool', action: open('running', s.project) },
+  ]
+}
+
+export function runMenu(r: { session: string; project: string; id: string }): Menu {
+  return [
+    { id: 20, name: 'Open session', action: open('session', r.project, r.session) },
+    { id: 21, name: 'Open on phone', action: phone('run', r.project, r.id) },
+  ]
+}
+
+export function projectMenu(p: { id: string }): Menu {
+  return [
+    { id: 30, name: 'Focus on this', action: { do: 'focus-project', project: p.id } },
+    { id: 31, name: 'Recent commits', action: open('commits', p.id, p.id) },
+    { id: 32, name: 'Open on phone', action: phone('project', p.id, p.id) },
+  ]
+}
+
+export function todoMenu(t: { id: string; project: string }): Menu {
+  return [
+    { id: 40, name: 'Mark done', action: { do: 'todo-done', id: t.id } },
+    { id: 41, name: 'Move to top', action: { do: 'none' } },
+    { id: 42, name: 'Open on phone', action: phone('todo', t.project, t.id) },
+  ]
+}
+
+/** The menu a list page declares: the union of its rows' menus, deduplicated by id. */
+function listMenu(rows: Row[], fallback: Menu): Menu {
+  const seen = new Map<number, MenuItem>()
+  for (const row of rows) for (const item of row.menu ?? []) if (!seen.has(item.id)) seen.set(item.id, item)
+  return seen.size ? [...seen.values()].slice(0, 10) : fallback
+}
+
+// ---- status bar ---------------------------------------------------------------------------------
+
+export function statusText(d: Data, page: Page): string {
+  const parts = [d.armed ? 'ARMED' : 'OFF']
+  const focus = (d.rootDeck ?? d.deck)?.focus
+  if (focus) parts.push(`FOCUS ${focus.projects.join('+')}${focus.left_s != null ? ` · ${ago(focus.left_s)}` : ''}`)
+  else if (page.kind === 'deck' && page.scope !== 'all') parts.push('FOCUS off')
+  if (page.kind === 'project' && d.project) {
+    return [d.project.branch, d.project.dirty ? `${d.project.dirty} dirty` : 'clean', d.clock].filter(Boolean).join(' · ')
+  }
+  parts.push(d.clock)
+  return parts.join(' · ')
+}
+
+export function crumb(stack: Page[]): string {
+  const labels = stack.map(p => p.label ?? p.kind.toUpperCase())
+  return labels.length === 1 ? labels[0] : `${labels[labels.length - 2]} › ${labels[labels.length - 1]}`
+}
+
+export function barText(stack: Page[], d: Data): string {
+  return bar(crumb(stack), statusText(d, stack[stack.length - 1]), ROW_W)
+}
+
+// ---- lists --------------------------------------------------------------------------------------
+
+function deckRows(c: DeckCounts | undefined, scope: string, project?: Project): Row[] {
+  const n = (v: number | undefined) => (c ? String(v ?? 0) : '…')
+  const rows: Row[] = [
+    { key: 'needs', cols: [{ text: 'Needs you', x: 0 }, { text: n(c?.needs_you), x: 170 }], open: open('needs', scope, undefined, 'NEEDS YOU') },
+    { key: 'sessions', cols: [{ text: 'Sessions', x: 0 }, { text: c ? (project ? n(c.sessions) : `${c.sessions} active`) : '…', x: 170 }], open: open('sessions', scope, undefined, 'SESSIONS') },
+    { key: 'running', cols: [{ text: 'Running', x: 0 }, { text: c ? (c.running ? `${c.running} · longest ${ago(c.longest_s)}` : '0') : '…', x: 170 }], open: open('running', scope, undefined, 'RUNNING') },
+  ]
+  if (!project) rows.push({ key: 'projects', cols: [{ text: 'Projects', x: 0 }, { text: n(c?.projects), x: 170 }], open: open('projects', 'all', undefined, 'PROJECTS') })
+  rows.push({ key: 'todos', cols: [{ text: 'To-dos', x: 0 }, { text: c ? `${c.todos_open} open` : '…', x: 170 }], open: open('todos', scope, undefined, 'TO-DOS') })
+  if (project) {
+    rows.push({ key: 'commits', cols: [{ text: 'Recent commits', x: 0 }, { text: String(project.commits?.length ?? '…'), x: 170 }],
+      open: open('commits', project.id, project.id, 'COMMITS') })
+  } else {
+    const f = c?.focus
+    rows.push({ key: 'focus', cols: [{ text: 'Focus', x: 0 }, { text: f ? `${f.projects.join('+')}${f.left_s != null ? ` · ${ago(f.left_s)}` : ''}` : 'off', x: 170 }],
+      open: open('focus', 'all', undefined, 'FOCUS') })
+  }
+  return rows
+}
+
+function sessionRow(s: Session): Row {
+  const what = s.state === 'waiting' ? (s.waiting_for === 'input' ? 'waiting · input' : `waiting · ${s.current?.tool ?? ''}`)
+    : s.state === 'working' && s.current ? `working · ${s.current.tool}` : s.state
+  const age = s.state === 'waiting' && s.state_for_s < 3600 ? ago(s.state_for_s, true) : ago(s.state_for_s)
+  const where = s.tag ? `${s.project_name}:${s.tag}` : s.project === '(other)' ? s.folder : s.project_name
+  return { key: s.id, cols: [{ text: AGENT_BADGE[s.agent] ?? s.agent, x: 0 }, { text: where, x: 50 }, { text: what, x: 158 }], right: age,
+    open: open('session', s.project, s.id, `${where} · ${AGENT_NAME[s.agent] ?? s.agent}`), menu: sessionMenu(s) }
+}
+
+function runRow(r: Run): Row {
+  return { key: r.id, cols: [{ text: ago(r.elapsed_s), x: 0 }, { text: AGENT_BADGE[r.agent] ?? r.agent, x: 46 }, { text: r.project_name, x: 100 },
+    { text: r.target || r.tool, x: 208 }], open: open('run', r.project, r.id, r.target || r.tool), menu: runMenu(r) }
+}
+
+function needRow(n: Need): Row {
+  const age = n.for_s < 3600 ? ago(n.for_s, true) : ago(n.for_s)
+  const badge = n.kind === 'card' ? (n.level === 'error' ? '!' : '·') : AGENT_BADGE[n.agent ?? ''] ?? '·'
+  const action: Action = n.kind === 'approval' ? { do: 'prompt', request: n.id }
+    : n.kind === 'session' ? open('session', n.project, n.id, `${n.project_name} · ${AGENT_NAME[n.agent ?? ''] ?? ''}`)
+      : open('card', n.project, n.id, 'CARD')
+  const what = n.kind === 'approval' ? `${n.tool} ${n.title}` : n.title
+  return { key: `${n.kind}:${n.id}`, cols: [{ text: badge, x: 0 }, { text: n.project_name, x: 50 }, { text: what, x: 158 }], right: age, open: action,
+    menu: n.session ? sessionMenu({ id: n.session, project: n.project }) : undefined }
+}
+
+function projectRow(p: Project): Row {
+  const c = p.counts
+  const busy = [c.waiting && `${c.waiting} waiting`, c.running && `${c.running} running`, `${plural(c.sessions, 'session')}`].filter(Boolean).join(' · ')
+  return { key: p.id, cols: [{ text: p.pinned ? '●' : '', x: 0 }, { text: p.name, x: 18 }, { text: busy, x: 150 }],
+    open: open('project', p.id, p.id, p.name), menu: projectMenu(p) }
+}
+
+function todoRow(t: Todo): Row {
+  return { key: t.id, cols: [{ text: t.project_name, x: 0 }, { text: t.text, x: 110 }], open: open('todo', t.project, t.id, 'TO-DO'), menu: todoMenu(t) }
+}
+
+function focusRow(p: Project): Row {
+  return { key: p.id, cols: [{ text: p.pinned ? '●' : '○', x: 0 }, { text: p.name, x: 22 }], open: { do: 'focus-project', project: p.id } }
+}
+
+function capped(rows: Row[], more: number, what: string): Row[] {
+  const shown = rows.slice(0, MAX_ROWS - (more || rows.length > MAX_ROWS ? 1 : 0))
+  const hidden = more + rows.length - shown.length
+  return hidden > 0 ? [...shown, { key: 'more', cols: [{ text: `› ${hidden} more ${what} on phone`, x: 0 }], open: { do: 'none' } }] : shown
+}
+
+export function listScreen(stack: Page[], d: Data): ListScreen {
+  const page = stack[stack.length - 1]
+  const base = { template: 'list' as const, key: `${page.kind}:${page.scope}:${page.id ?? ''}`, crumb: crumb(stack), status: statusText(d, page), note: '' }
+  switch (page.kind as ListKind) {
+    case 'deck': {
+      const c = d.deck
+      const note = c?.outside_focus ? `outside focus: ${c.outside_focus.active} active, ${c.outside_focus.waiting} waiting` : ''
+      return { ...base, rows: deckRows(c, page.scope), note, hint: stack.length === 1 ? 'tap open · 2× exit · hold actions' : 'tap open · 2× back · hold actions',
+        menu: DECK_MENU, empty: '' }
+    }
+    case 'project': {
+      const rows = deckRows(d.deck, page.scope, d.project ?? { id: page.scope, name: page.label ?? page.scope, branch: '', dirty: 0, pinned: false, counts: { sessions: 0, running: 0, waiting: 0, todos_open: 0 } })
+      return { ...base, rows, hint: 'tap open · 2× back · hold focus on this', menu: projectMenu({ id: page.scope }), empty: '' }
+    }
+    case 'needs': {
+      const rows = capped((d.needs?.items ?? []).map(needRow), d.needs?.more ?? 0, 'items')
+      return { ...base, rows, hint: 'tap open · 2× back · hold actions', menu: listMenu(rows, [{ id: 50, name: 'Open on phone', action: phone('needs', page.scope) }]),
+        empty: d.needs ? 'Nothing needs you.' : 'Loading…' }
+    }
+    case 'sessions': {
+      const rows = capped((d.sessions?.items ?? []).filter(s => !s.muted).map(sessionRow), d.sessions?.more ?? 0, 'sessions')
+      return { ...base, rows, hint: 'tap open · 2× back · hold actions', menu: listMenu(rows, [{ id: 10, name: 'Open on phone', action: phone('sessions', page.scope) }]),
+        empty: d.sessions ? 'No sessions.' : 'Loading…' }
+    }
+    case 'running': {
+      const rows = capped((d.runs?.items ?? []).map(runRow), d.runs?.more ?? 0, 'runs')
+      const count = d.runs ? d.runs.items.length + d.runs.more : 0
+      const labelled = { ...base, crumb: crumb([...stack.slice(0, -1), { ...page, label: `RUNNING · ${count}` }]) }
+      return { ...labelled, rows, hint: 'oldest first · tap open · 2× back', menu: listMenu(rows, [{ id: 21, name: 'Open on phone', action: phone('running', page.scope) }]),
+        empty: d.runs ? 'Nothing running.' : 'Loading…' }
+    }
+    case 'projects': {
+      const rows = (d.projects?.items ?? []).map(projectRow)
+      return { ...base, rows, hint: 'tap open · 2× back · hold actions', menu: listMenu(rows, [{ id: 32, name: 'Open on phone', action: phone('projects', 'all') }]),
+        empty: d.projects ? 'No projects configured.' : 'Loading…' }
+    }
+    case 'todos': {
+      const rows = capped((d.todos?.items ?? []).map(todoRow), d.todos?.more ?? 0, 'to-dos')
+      const open_ = d.todos ? d.todos.items.length + d.todos.more : 0
+      const labelled = { ...base, crumb: crumb([...stack.slice(0, -1), { ...page, label: `TO-DOS · ${open_} open` }]) }
+      return { ...labelled, rows, hint: 'tap open · 2× back · hold actions', menu: listMenu(rows, [{ id: 42, name: 'Open on phone', action: phone('todos', page.scope) }]),
+        empty: d.todos ? 'No open to-dos.' : 'Loading…' }
+    }
+    case 'focus': {
+      const rows = (d.projects?.items ?? []).filter(p => p.id !== '(other)').map(focusRow)
+      return { ...base, rows, hint: 'tap pin (max 2) · 2× back', menu: [], empty: d.projects ? 'No projects configured.' : 'Loading…' }
+    }
+  }
+}
+
+// ---- details ------------------------------------------------------------------------------------
+
+export function detailScreen(stack: Page[], d: Data): DetailScreen {
+  const page = stack[stack.length - 1]
+  const base = { template: 'detail' as const, key: `${page.kind}:${page.scope}:${page.id ?? ''}`, crumb: crumb(stack), status: statusText(d, page) }
+  switch (page.kind as DetailKind) {
+    case 'session': {
+      const s = d.session
+      if (!s) return { ...base, headline: 'Loading…', body: '', hint: '2× back', menu: sessionMenu({ id: page.id ?? '', project: page.scope }) }
+      const head = s.state === 'waiting'
+        ? `${s.waiting_for === 'input' ? 'WAITING FOR INPUT' : 'WAITING ON YOU'} · ${ago(s.state_for_s, true)}`
+        : `${s.state.toUpperCase()} · ${ago(s.state_for_s)}`
+      const current = s.current ? `${s.current.tool}  ${s.current.target}` : ''
+      const lines = [
+        s.title && `Title   ${s.title}`,
+        `Model   ${[s.model || '—', `${s.counts.tools} tools`, `${s.counts.approved} approved`, s.counts.failed ? `${s.counts.failed} failed` : ''].filter(Boolean).join(' · ')}`,
+        lastRun(s),
+      ].filter(Boolean) as string[]
+      return { ...base, headline: `${head}\n${current}`.trim(), body: lines.join('\n'),
+        hint: s.pending_request ? 'tap open prompt · 2× back · hold actions' : '2× back · hold actions',
+        menu: sessionMenu(s), primary: s.pending_request ? { do: 'prompt', request: s.pending_request } : undefined }
+    }
+    case 'run': {
+      const r = d.run
+      if (!r) return { ...base, headline: 'Loading…', body: '', hint: '2× back', menu: runMenu({ id: page.id ?? '', session: '', project: page.scope }) }
+      const live = r.status === 'running' || r.status === 'waiting'
+      const elapsed = r.elapsed_s + (live ? Math.floor(d.runAge ?? 0) : 0)
+      const started = new Date(r.started_at)
+      return { ...base, headline: live ? `ELAPSED ${ago(elapsed, true)}` : `${r.status.toUpperCase()} after ${ago(elapsed, true)}`,
+        body: [`Agent    ${AGENT_NAME[r.agent] ?? r.agent} · ${r.project_name}`, `Tool     ${r.tool}${r.kind === 'subagent' ? ' (subagent)' : ''}`,
+          r.target && `Target   ${r.target}`, `Started  ${String(started.getHours()).padStart(2, '0')}:${String(started.getMinutes()).padStart(2, '0')}`].filter(Boolean).join('\n'),
+        hint: 'tap open session · 2× back', menu: runMenu(r), primary: open('session', r.project, r.session, `${r.project_name} · ${AGENT_NAME[r.agent] ?? ''}`) }
+    }
+    case 'todo': {
+      const t = d.todo
+      if (!t) return { ...base, headline: 'Loading…', body: '', hint: '2× back', menu: [] }
+      const writable = t.source !== 'claude-task'
+      return { ...base, headline: t.done ? 'DONE' : t.text, body: [`Project  ${t.project_name}`, `From     ${t.source === 'claude-task' ? 'Claude Code task list' : t.file}`].join('\n'),
+        hint: t.done ? '2× back' : writable ? 'tap done · 2× back · hold actions' : 'done in Claude Code · 2× back',
+        menu: todoMenu(t), primary: !t.done && writable ? { do: 'todo-done', id: t.id } : undefined }
+    }
+    case 'card': {
+      const n = d.need
+      return { ...base, headline: n ? n.title : 'Gone', body: n ? `Project  ${n.project_name}\nLevel    ${n.level ?? 'info'}\nPosted   ${ago(n.for_s)} ago` : 'This card expired or was cleared.',
+        hint: '2× back', menu: [{ id: 50, name: 'Open on phone', action: phone('card', page.scope, page.id) }] }
+    }
+    case 'commits': {
+      const p = d.project
+      return { ...base, headline: p ? `${p.name} · ${p.branch || 'no branch'}` : 'Loading…', body: (p?.commits ?? []).map(c => `· ${c}`).join('\n') || (p ? 'No commits.' : ''),
+        hint: '2× back', menu: projectMenu({ id: page.scope }) }
+    }
+    case 'error': {
+      const e = d.error
+      return { ...base, headline: e ? `FAILED · ${e.detail}` : 'Gone', body: e ? [`Agent    ${AGENT_NAME[e.agent] ?? e.agent} · ${e.project}`, e.tool && `Tool     ${e.tool}`, e.target && `Target   ${e.target}`].filter(Boolean).join('\n') : '',
+        hint: e ? 'tap open session · 2× back' : '2× back', menu: e ? sessionMenu({ id: e.session, project: e.project }) : [],
+        primary: e ? open('session', e.project, e.session, `${e.project} · ${AGENT_NAME[e.agent] ?? ''}`) : undefined }
+    }
+  }
+}
+
+function lastRun(s: SessionDetail): string {
+  const run = [...s.events].reverse().find(e => e.type === 'run' && e.status !== 'running')
+  if (!run) return ''
+  return `Last    ${fit(`${run.target || run.tool}  ${run.tool}`, ROW_W - 80)}`
+}
+
+export function screenFor(stack: Page[], d: Data): Screen {
+  const kind = stack[stack.length - 1].kind
+  return ['session', 'run', 'todo', 'card', 'commits', 'error'].includes(kind) ? detailScreen(stack, d) : listScreen(stack, d)
+}
+
+/** A row as it appears on the glasses: the › marker on the highlighted one, columns at pixel x. */
+export function rowText(row: Row, selected: boolean): string {
+  return columns([{ text: selected ? '›' : '', x: 0 }, ...row.cols.map(c => ({ text: c.text, x: c.x + GUTTER }))], ROW_W,
+    row.right ? { text: row.right, edge: ROW_W - 4 } : undefined)
+}
+
+/** The window of rows to show so that the cursor is visible. */
+export function windowFor(cursor: number, top: number, count: number): number {
+  if (cursor < top) return cursor
+  if (cursor >= top + VISIBLE_ROWS) return cursor - VISIBLE_ROWS + 1
+  return Math.max(0, Math.min(top, Math.max(0, count - VISIBLE_ROWS)))
+}
