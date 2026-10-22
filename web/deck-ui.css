@@ -75,7 +75,7 @@ h1:focus:not(:focus-visible) { outline: none; }
 .sections a[aria-current="page"] { color: var(--g2); border-color: var(--g2-dim); background: var(--surface); }
 .sections .count { color: var(--text); }
 
-#deck-view { grid-area: main; display: grid; gap: var(--s3); align-content: start; min-width: 0; view-transition-name: deck-view; }
+#deck-view { grid-area: main; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s3); align-content: start; min-width: 0; view-transition-name: deck-view; }
 #deck-view h1 { font-size: 32px; line-height: 40px; font-weight: 600; }
 #deck-view h2 { font-size: 18px; line-height: 24px; font-weight: 600; margin-bottom: var(--s1); }
 #deck-view h2 a { text-decoration: none; }
@@ -102,7 +102,7 @@ h1:focus:not(:focus-visible) { outline: none; }
 
 .previews { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--s3); }
 
-.rows { display: grid; gap: 4px; }
+.rows { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .row {
   display: flex; gap: var(--s2); align-items: center;
   padding: var(--s1) var(--s2); min-block-size: 48px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); text-decoration: none;
@@ -111,13 +111,13 @@ h1:focus:not(:focus-visible) { outline: none; }
 .row .badge { inline-size: 40px; }
 .row .pin { inline-size: 16px; }
 .row .lead-col { inline-size: 48px; }
-.row .where { inline-size: 160px; }
-.row .what { flex: 1 1 auto; }
+.row .where { flex: 0 0 auto; max-inline-size: 36%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .what { flex: 1 1 0; min-inline-size: 10ch; overflow-wrap: break-word; }
 a.row:hover { border-color: var(--g2-dim); }
 .row .badge { color: var(--g2); font-weight: 600; font-size: 14px; }
 .row .pin { color: var(--g2); }
-.row .where { color: var(--text); overflow-wrap: anywhere; }
-.row .what { color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+.row .where { color: var(--text); }
+.row .what { color: var(--muted); }
 .row .when { color: var(--muted); text-align: right; }
 .row .lead-col { text-align: left; }
 .row.state-waiting .what { color: var(--warn); }
@@ -149,7 +149,7 @@ a.row:hover { border-color: var(--g2-dim); }
 /* ---- presenter view: 1920 x 1080, large type, no scrollbars ------------------------------------- */
 
 .deck--present {
-  width: 1920px; height: 1080px; overflow: hidden; display: grid;
+  width: 100vw; height: 100vh; overflow: hidden; display: grid; /* built for 1920 x 1080; the demo also shows it at 1536 x 1080 */
   grid-template: "head head" 96px "main ticker" 1fr / minmax(0, 1fr) 560px; gap: var(--s3); padding: var(--s4) var(--s6);
   font-size: 28px; line-height: 1.35;
 }
@@ -161,16 +161,18 @@ a.row:hover { border-color: var(--g2-dim); }
 .deck--present #deck-view h1 { font-size: 48px; line-height: 56px; }
 .deck--present #deck-view h2 { font-size: 30px; line-height: 40px; }
 .deck--present .tiles { grid-template-columns: repeat(3, 1fr); gap: var(--s3); }
-.deck--present .tile { min-block-size: 168px; padding: var(--s3); }
+.deck--present .tile { min-block-size: 136px; padding: var(--s2) var(--s3); }
 .deck--present .tile .label { font-size: 28px; }
-.deck--present .tile .value { font-size: 72px; line-height: 80px; }
+.deck--present .tile .value { font-size: 64px; line-height: 72px; }
 .deck--present .tile .note { font-size: 24px; }
 .deck--present .row { min-block-size: 72px; font-size: 26px; }
 .deck--present .row .badge { inline-size: 64px; }
 .deck--present .row .lead-col { inline-size: 72px; }
-.deck--present .row .where { inline-size: 200px; }
-.deck--present .previews { grid-template-columns: 1fr 1fr; }
-.deck--present .previews .rows li:nth-child(n + 4) { display: none; }
+.deck--present .row .where { max-inline-size: 40%; }
+.deck--present .previews { grid-template-columns: minmax(0, 1fr); gap: var(--s2); }
+.deck--present .previews h2 { margin-bottom: 4px; }
+.deck--present .previews .rows li:nth-child(n + 2) { display: none; } /* the top row of each, on one line */
+.deck--present .previews .row .what { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .deck--present .rows li:nth-child(n + 9) { display: none; }
 .deck--present .lead { font-size: 32px; line-height: 44px; }
 .deck--present .timeline li:nth-child(n + 9), .deck--present .commits li:nth-child(n + 9) { display: none; }

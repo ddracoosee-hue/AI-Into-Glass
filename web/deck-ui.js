@@ -14,6 +14,7 @@ const DEPTH = { deck: 0, needs: 1, sessions: 1, running: 1, projects: 1, todos: 
 const TITLES = { deck: 'Deck', needs: 'Needs you', sessions: 'Sessions', running: 'Running', projects: 'Projects', todos: 'To-dos',
   focus: 'Focus', project: 'Project', session: 'Session', run: 'Run', todo: 'To-do', commits: 'Recent commits', card: 'Card', error: 'Failure' }
 const SECTIONS = ['deck', 'needs', 'sessions', 'running', 'projects', 'todos', 'focus']
+const ENDED = { ended: 'from the Deck', timer: 'when its timer ran out', disarmed: 'when the gate was disarmed', replaced: 'for a new focus' }
 const WHY = { 'no device listening': 'nobody watching', 'outside focus': 'outside focus', muted: 'muted', timeout: 'timed out', cancelled: 'cancelled' }
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
@@ -63,7 +64,7 @@ function eventLine(e) {
     case 'card': return `${where} ${esc(e.title ?? e.card)} · ${esc(e.status)}`
     case 'todo': return `${where} to-do ${e.status === 'done' ? 'done' : 'added'}: ${esc(e.text)}`
     case 'focus_start': return `focus on ${esc((e.projects ?? []).join(' + '))}${e.minutes ? ` for ${num(e.minutes)} min` : ''}`
-    case 'focus_end': return `focus ended (${esc(e.reason)}): ${num(e.summary?.approved)} approved, ${num(e.summary?.runs)} runs, ${num(e.summary?.todos)} to-dos`
+    case 'focus_end': return `focus ended ${esc(ENDED[e.reason] ?? e.reason)}: ${plural(e.summary?.approved, 'approval')}, ${num(e.summary?.denied)} denied, ${plural(e.summary?.runs, 'run')}, ${plural(e.summary?.todos, 'to-do')} done`
     case 'armed': return e.armed ? 'gate armed' : 'gate disarmed'
     case 'view': return null
     default: return null
@@ -427,7 +428,7 @@ export function mountDeck(root, api, opts = {}) {
   function showSummary(s) {
     const box = present ? $('deck-summary') : null
     if (box) {
-      box.innerHTML = `<h2>Focus block done</h2><p class="lead">${esc((s.projects ?? []).join(' + '))} · ${esc(s.reason)}</p>${summaryList(s)}`
+      box.innerHTML = `<h2>Focus block done</h2><p class="lead">${esc((s.projects ?? []).join(' + '))}, ${esc(ENDED[s.reason] ?? s.reason)}</p>${summaryList(s)}`
       box.hidden = false
       setTimeout(() => { box.hidden = true }, 12_000)
     }
