@@ -112,3 +112,14 @@ Simulator runs added: `sim.py run running` (live agents), `run tick` and `run si
 | D2 | `todo.id` is a hash of the file and the line text | A hash of project, file, line text and occurrence number | Two identical lines in one file would otherwise share an id, and "done" has to flip exactly one |
 | D3 | (Tap, tap) | The to-do screen keeps the last copy it read, even after the line changes on disk. The second tap still goes to the relay, which answers 409, and the screen says CHANGED ON DISK | The glasses never decide on their own that a file changed. The relay's hash check is the only judge |
 | D4 | (Zero console errors) | Simulator runs fail on any console error except the ones a run provokes on purpose, each listed in the run by its exact message | evenhub-simulator logs every non-2xx fetch as an error, including the 409 that Phase D's acceptance asks for |
+
+## Phase E: focus mode
+
+| # | The plan said | The code does | Why |
+|---|---|---|---|
+| E1 | Long-press a project, then Focus on this | Starts a 25-minute focus on that one project, replacing any focus already on | One long-press should be enough to start. The picker is where you pin two projects, or pick 50 minutes or no timer |
+| E2 | Focus picker: tap pins or unpins (max 2) | The picker shows ○ and ● rows for projects. Once one is pinned, `Start … 25 min`, `50 min` and `no timer` rows appear, plus `End focus` while focus is on | A tap must start focus somewhere, and the plan named no gesture for picking the length |
+| E3 | The summary shows for 4 s when focus ends | It also shows for ends the glasses didn't cause (the timer, a disarm on the PC). The plugin notices focus vanish between polls and reads `GET /focus`'s `last_summary` | The summary is the closing beat however the block ends |
+| E4 | (Menu input) | Swipes and taps while the menu is open are dropped by the page | evenhub-simulator hands menu swipes to the page underneath as well. Its menu opens on its first item and wraps around at the ends |
+| E5 | A list's long-press menu | Fixed per row type (sessions, runs, projects, to-dos), not built from the rows | The menu is declared when the page is built, usually before its rows arrive. A data-built menu fell back to one item and stayed that way |
+| E6 | "A git push from a hub session falls back in under 0.5 s" | `sim.py run focus` times the real gate hook process (`python -I hook/approval_gate_hook.py`) on a PermissionRequest from hub: 0.16 s, no output | That is the program Claude Code runs. Timing it directly measures the fallback, not the model's thinking time |

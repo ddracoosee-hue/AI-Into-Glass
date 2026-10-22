@@ -119,6 +119,20 @@ class Run:
             self.failures.append(f"no row {key!r}")
         time.sleep(0.4)
 
+    def menu(self, index: int, expect: str) -> None:
+        """Pick the long-press menu's item at `index`. The simulator's menu opens on its first item and
+        wraps at the ends."""
+        self.seen = max((e["id"] for e in console()), default=self.seen)
+        send("menu")
+        if not self.expect(r'EvenHub event: \{"jsonData":\{"eventType":4\}', 6):
+            return
+        time.sleep(0.6)
+        for _ in range(index):
+            send("down")
+            time.sleep(0.4)
+        send("click")
+        self.expect(expect, 5)
+
     def shot(self, label: str) -> None:
         shot(str(SHOTS / f"{self.name}-{label}.png"))
 
@@ -337,7 +351,97 @@ def run_tick() -> None:
     run.finish()
 
 
-TODO_COPY = "# TODO\n\n- [ ] README threat model\n- [ ] record demo, rm -r build step\n- [x] ship v1\n"
+def gate_hook(cwd: str, command: str = "git push origin main") -> subprocess.Popen:
+    """The real gate hook, as Claude Code runs it, on a PermissionRequest from a session in `cwd`."""
+    event = {"session_id": "focus-check", "hook_event_name": "PermissionRequest", "cwd": cwd, "tool_name": "Bash",
+             "tool_input": {"command": command}, "permission_mode": "default"}
+    proc = subprocess.Popen([sys.executable, "-I", str(ROOT / "hook" / "approval_gate_hook.py")], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, env={**os.environ, "APPROVAL_GATE_HOME": str(STATE)})
+    proc.stdin.write(json.dumps(event).encode())
+    proc.stdin.close()
+    return proc
+
+
+def ingest(agent: str, event: dict) -> None:
+    req = urllib.request.Request(f"http://127.0.0.1:8798/ingest?agent={agent}", data=json.dumps(event).encode(), method="POST",
+                                 headers={"Authorization": f"Bearer {(STATE / 'ingest.key').read_text().strip()}"})
+    urllib.request.urlopen(req, timeout=5).read()
+
+
+def run_focus() -> None:
+    """Phase E: with focus on glasses, a git push from hub falls back to the terminal in under 0.5 s
+    while a glasses prompt still reaches the simulator; the summary's counts match the event log."""
+    run = Run("focus")
+    subprocess.run([sys.executable, str(ROOT / "scripts" / "devstack.py"), "reset"], check=True, capture_output=True)
+    at_root(run)
+    run.goto("projects")
+    run.do("click", r"page projects:all: depth 2", pause=1.6)
+    run.goto("glasses")
+    run.menu(0, r"menu 30 on projects:all: row 0")  # Focus on this is the project menu's first item
+    if not run.expect(r"\[deck\] focus on glasses"):
+        run.finish()
+    time.sleep(2.5)
+    run.shot("0-focus-on")
+    gate("arm")
+    try:
+        started = time.monotonic()
+        hub = gate_hook("C:\\deck-sandbox\\hub")
+        try:
+            out = hub.communicate(timeout=10)[0]
+        except subprocess.TimeoutExpired:
+            hub.kill()
+            out = b"<still waiting after 10 s>"
+        took = time.monotonic() - started
+        ok = out == b"" and took < 0.5
+        print(f"  {'ok  ' if ok else 'FAIL'}  hub push went to the terminal in {took:.2f} s (hook printed {out!r})")
+        if not ok:
+            run.failures.append(f"hub push: {took:.2f} s, output {out!r}")
+        # A hub session waiting in its terminal shows only as a count on the Deck.
+        for name in ("SessionStart", "UserPromptSubmit", "PermissionRequest"):
+            ingest("claude-code", {"hook_event_name": name, "session_id": "hub-out", "cwd": "C:\\deck-sandbox\\hub", "tool_name": "Write",
+                                   "tool_input": {"file_path": "C:\\deck-sandbox\\hub\\notes.md"}})
+        glasses = gate_hook("C:\\deck-sandbox\\glasses")
+        run.expect(r"\[deck\] prompt req_\w+ over projects:all:")
+        time.sleep(STEP)
+        run.shot("1-glasses-prompt")
+        run.do("click", r"rebuild result:APPROVED", pause=0)
+        out = glasses.communicate(timeout=10)[0]
+        allowed = b'"behavior": "allow"' in out
+        print(f"  {'ok  ' if allowed else 'FAIL'}  glasses push reached the simulator and the hook printed allow")
+        if not allowed:
+            run.failures.append(f"glasses hook output {out!r}")
+        run.expect(r"restored projects:all:")
+        time.sleep(1.5)
+        run.do("double", r"page deck:focus: depth 1", pause=2.5)
+        run.shot("2-outside-focus")
+        note = deck_get("/deck?scope=focus")["outside_focus"]
+        print(f"  {'ok  ' if note and note['waiting'] >= 1 else 'FAIL'}  Deck: outside focus {note}")
+        if not note or note["waiting"] < 1:
+            run.failures.append(f"outside_focus {note}")
+        run.goto("focus")
+        run.do("click", r"page focus:all: depth 2", pause=1.6)
+        run.goto("end")
+        run.do("click", r"\[deck\] focus summary", pause=0.5)
+        run.shot("3-summary")
+    finally:
+        gate("disarm")
+    shown = json.loads(next(e["message"] for e in reversed(console()) if e["message"].startswith("[deck] focus summary")).split(" ", 3)[3])
+    events = deck_get("/events?since=0")["events"]
+    start = next(e for e in reversed(events) if e["type"] == "focus_start")
+    end = next(e for e in reversed(events) if e["type"] == "focus_end")
+    inside = [e for e in events if start["id"] < e["id"] < end["id"] and e.get("project") in start["projects"]]
+    counted = {"approved": sum(e["type"] == "approval" and e.get("status") == "approved" for e in inside),
+               "denied": sum(e["type"] == "approval" and e.get("status") == "denied" for e in inside),
+               "runs": sum(e["type"] == "run" and e.get("status") in ("ok", "failed") for e in inside),
+               "todos": sum(e["type"] == "todo" and e.get("status") == "done" for e in inside)}
+    match = all(shown[k] == v for k, v in counted.items()) and end["summary"]["approved"] == shown["approved"] == 1
+    print(f"  {'ok  ' if match else 'FAIL'}  summary {shown} matches the event log {counted}")
+    if not match:
+        run.failures.append(f"summary {shown} vs log {counted} / relay {end['summary']}")
+    run.finish()
+
+
+TODO_COPY ="# TODO\n\n- [ ] README threat model\n- [ ] record demo, rm -r build step\n- [x] ship v1\n"
 
 
 def run_todo() -> None:
@@ -384,7 +488,7 @@ def main() -> None:
         sys.exit(__doc__)
     cmd = sys.argv[1]
     if cmd == "run":
-        scenarios = {"walk": run_walk, "interrupt": run_interrupt, "running": run_running, "since": run_since, "tick": run_tick, "todo": run_todo}
+        scenarios = {"walk": run_walk, "interrupt": run_interrupt, "running": run_running, "since": run_since, "tick": run_tick, "todo": run_todo, "focus": run_focus}
         if len(sys.argv) < 3 or sys.argv[2] not in scenarios:
             sys.exit(f"run one of: {', '.join(scenarios)}")
         return scenarios[sys.argv[2]]()
