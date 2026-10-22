@@ -123,3 +123,16 @@ Simulator runs added: `sim.py run running` (live agents), `run tick` and `run si
 | E4 | (Menu input) | Swipes and taps while the menu is open are dropped by the page | evenhub-simulator hands menu swipes to the page underneath as well. Its menu opens on its first item and wraps around at the ends |
 | E5 | A list's long-press menu | Fixed per row type (sessions, runs, projects, to-dos), not built from the rows | The menu is declared when the page is built, usually before its rows arrive. A data-built menu fell back to one item and stayed that way |
 | E6 | "A git push from a hub session falls back in under 0.5 s" | `sim.py run focus` times the real gate hook process (`python -I hook/approval_gate_hook.py`) on a PermissionRequest from hub: 0.16 s, no output | That is the program Claude Code runs. Timing it directly measures the fallback, not the model's thinking time |
+
+## Phase F: desktop page and phone page
+
+| # | The plan said | The code does | Why |
+|---|---|---|---|
+| F1 | One web UI, two hosts | One plain ES module, `web/deck-ui.js`, with no build step. The relay serves it on 127.0.0.1:8799; the plugin imports the same file for its phone page | The relay stays stdlib Python with nothing to compile, and the phone page can't drift from the desktop page |
+| F2 | Desktop page on 8799, loopback only | Read-only: `/api/*` reads, no writes and no token. A `Host` header that isn't 127.0.0.1 or localhost gets 403, there are no CORS headers, and a strict CSP applies | A web page in your browser can't read it, not even through DNS rebinding. Writes stay on the glasses |
+| F3 | (Presence) | The desktop page's `/events` long-poll never counts as a device watching | Otherwise an open desktop tab would send prompts to glasses nobody is wearing |
+| F4 | `/present` "follows" the glasses (beat sheet) | The plugin reports the page it shows with `POST /view` (device token). The relay keeps it in memory as a `view` event, never written to `deck.log`, and `/present` follows it | Nothing else tells the relay what the glasses show. It is display state and changes nothing an agent does |
+| F5 | Phone page "behind its flag" | `VITE_DECK_PHONE=1` at build time; off by default. The public build contains none of the deck UI code (checked). The devstack turns it on | "Phone page off by default in public builds" |
+| F6 | Full paths hidden until clicked | Every target on the desktop and phone pages (commands, files, patterns) shows a "show" button until clicked, plus a "Show all paths" toggle. `/present` shows them, since it has no clicks and the demo repos are throwaway | The phone page must hide them; the desktop does the same so the two read alike |
+| F7 | Lighthouse accessibility ≥ 90 | 100 on the Deck, the Sessions view and `/present` (Lighthouse 12 via npx, approved Oct 22) | Landmarks, a skip link, real headings, focus moved to the new heading after each transition, one polite live region for approvals and failures, and contrast that passes on the dark theme |
+| F8 | (Tooling) | `scripts/cdp.mjs` drives headless Chrome over the DevTools protocol with Node's built-in WebSocket: screenshots, evals, and sampling the live page every 250 ms | `--headless --screenshot` never finishes on a page that long-polls, and there was nothing to install |

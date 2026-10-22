@@ -441,7 +441,90 @@ def run_focus() -> None:
     run.finish()
 
 
-TODO_COPY ="# TODO\n\n- [ ] README threat model\n- [ ] record demo, rm -r build step\n- [x] ship v1\n"
+TILES = ("[...document.querySelectorAll('#deck-view .tile')].map(t => [t.querySelector('.label').textContent,"
+         " t.querySelector('.value').textContent])")
+
+
+def run_desktop() -> None:
+    """Phase F: the desktop page and the glasses show the same counts within 3 s across a scripted
+    run; Open on phone routes the phone page; /present follows the glasses."""
+    run = Run("desktop")
+    subprocess.run([sys.executable, str(ROOT / "scripts" / "devstack.py"), "reset"], check=True, capture_output=True)
+    at_root(run)
+    samples = STATE / "desktop-samples.jsonl"
+    sampler = subprocess.Popen(["node", str(ROOT / "scripts" / "cdp.mjs"), "sample", "http://127.0.0.1:8799/", TILES, str(samples), "62"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(4)
+    rec = "C:\\deck-sandbox\\glasses"
+    steps = [  # each changes at least one count on the Deck
+        ("claude-code", {"hook_event_name": "SessionStart", "session_id": "dsk-1", "cwd": rec}),
+        ("claude-code", {"hook_event_name": "PreToolUse", "session_id": "dsk-1", "cwd": rec, "tool_name": "Bash", "tool_use_id": "toolu_dsk_1",
+                         "tool_input": {"command": "npm test"}}),
+        ("claude-code", {"hook_event_name": "PreToolUse", "session_id": "dsk-1", "cwd": rec, "tool_name": "Bash", "tool_use_id": "toolu_dsk_2",
+                         "tool_input": {"command": "git push origin main"}}),
+        ("claude-code", {"hook_event_name": "PermissionRequest", "session_id": "dsk-1", "cwd": rec, "tool_name": "Bash",
+                         "tool_input": {"command": "git push origin main"}}),
+        ("codex", {"hook_event_name": "SessionStart", "session_id": "dsk-2", "cwd": "C:\\deck-sandbox\\hub", "model": "gpt"}),
+        ("claude-code", {"hook_event_name": "TaskCreated", "session_id": "dsk-1", "cwd": rec, "task_id": "9", "task_subject": "write the docs"}),
+        ("claude-code", {"hook_event_name": "PostToolUse", "session_id": "dsk-1", "cwd": rec, "tool_name": "Bash", "tool_use_id": "toolu_dsk_2"}),
+        ("claude-code", {"hook_event_name": "PostToolUse", "session_id": "dsk-1", "cwd": rec, "tool_name": "Bash", "tool_use_id": "toolu_dsk_1"}),
+        ("codex", {"hook_event_name": "SessionEnd", "session_id": "dsk-2", "cwd": "C:\\deck-sandbox\\hub"}),
+    ]
+    relay_states, glasses_states = [], []
+    started = time.time()
+    for agent_name, event in steps:
+        ingest(agent_name, event)
+        until = time.time() + 5.5
+        while time.time() < until:
+            d = deck_get("/deck?scope=focus")
+            state = (d["needs_you"], d["sessions"], d["running"], d["projects"], d["todos_open"])
+            if not relay_states or relay_states[-1][1] != state:
+                relay_states.append((time.time(), state))
+            for e in run.entries():
+                run.seen = e["id"]
+                if e["message"].startswith("[deck] counts "):
+                    c = json.loads(e["message"].split(" ", 2)[2])
+                    glasses_states.append((time.time(), (c["needs"], c["sessions"], c["running"], c["projects"], c["todos"])))
+            time.sleep(0.25)
+    sampler.wait(30)
+    names = ("Needs you", "Sessions", "Running", "Projects", "To-dos")
+    desktop_states = []
+    for line in samples.read_text(encoding="utf-8").splitlines():
+        sample = json.loads(line)
+        tiles = dict(sample["v"] or [])
+        if all(n in tiles for n in names):
+            state = tuple(int(tiles[n]) for n in names)
+            if not desktop_states or desktop_states[-1][1] != state:
+                desktop_states.append((sample["t"] / 1000, state))
+
+    def shown_within(states, t0, value) -> bool:
+        before = [s for t, s in states if t <= t0]
+        return bool(before and before[-1] == value) or any(s == value and t0 <= t <= t0 + 3 for t, s in states)
+
+    for t0, value in relay_states:
+        for name, states in (("glasses", glasses_states), ("desktop", desktop_states)):
+            if not shown_within(states, t0, value):
+                run.failures.append(f"{name} never showed {value} within 3 s of +{t0 - started:.1f}s")
+    print(f"  {'ok  ' if not run.failures else 'FAIL'}  {len(relay_states)} relay states; glasses and desktop matched each within 3 s")
+
+    # Open on phone: a glasses menu routes the phone page, which shares the plugin's WebView.
+    run.goto("sessions")
+    run.do("click", r"page sessions:focus: depth 2", pause=1.6)
+    run.menu(0, r"menu 10 on sessions:focus: row 0")
+    run.expect(r'\[deck\] phone route \{"view":"session"')
+    time.sleep(1.5)
+    urllib.request.urlretrieve("http://127.0.0.1:9898/api/screenshot/webview", str(SHOTS / "desktop-phone-route.png"))
+    # /present follows the glasses: it now shows the Sessions page.
+    out = subprocess.run(["node", str(ROOT / "scripts" / "cdp.mjs"), "eval", "http://127.0.0.1:8799/present",
+                          "document.querySelector('#deck-view h1')?.textContent", "3500"], capture_output=True, text=True, timeout=60)
+    heading = json.loads(out.stdout or "null")
+    print(f"  {'ok  ' if heading == 'Sessions' else 'FAIL'}  /present follows the glasses: {heading!r}")
+    if heading != "Sessions":
+        run.failures.append(f"/present showed {heading!r}")
+    run.finish()
+
+
+TODO_COPY = "# TODO\n\n- [ ] README threat model\n- [ ] record demo, rm -r build step\n- [x] ship v1\n"
 
 
 def run_todo() -> None:
@@ -488,7 +571,7 @@ def main() -> None:
         sys.exit(__doc__)
     cmd = sys.argv[1]
     if cmd == "run":
-        scenarios = {"walk": run_walk, "interrupt": run_interrupt, "running": run_running, "since": run_since, "tick": run_tick, "todo": run_todo, "focus": run_focus}
+        scenarios = {"walk": run_walk, "interrupt": run_interrupt, "running": run_running, "since": run_since, "tick": run_tick, "todo": run_todo, "focus": run_focus, "desktop": run_desktop}
         if len(sys.argv) < 3 or sys.argv[2] not in scenarios:
             sys.exit(f"run one of: {', '.join(scenarios)}")
         return scenarios[sys.argv[2]]()

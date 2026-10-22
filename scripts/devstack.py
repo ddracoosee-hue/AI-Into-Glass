@@ -67,9 +67,9 @@ def prepare() -> None:
     R.save_devices(STATE, {"dev_devstack": {"label": "devstack simulator", "sha256": R.sha256(token()), "created_at": R.now_iso()}})
 
 
-def spawn(name: str, args: list[str], cwd: Path) -> int:
+def spawn(name: str, args: list[str], cwd: Path, extra: dict | None = None) -> int:
     log = open(STATE / f"{name}.log", "w", encoding="utf-8")
-    proc = subprocess.Popen(args, cwd=cwd, env=env(), stdout=log, stderr=subprocess.STDOUT, creationflags=DETACHED)
+    proc = subprocess.Popen(args, cwd=cwd, env={**env(), **(extra or {})}, stdout=log, stderr=subprocess.STDOUT, creationflags=DETACHED)
     pids = json.loads(PIDS.read_text()) if PIDS.exists() else {}
     pids[name] = proc.pid
     PIDS.write_text(json.dumps(pids))
@@ -114,11 +114,17 @@ def start_sim() -> None:
 def up() -> None:
     prepare()
     start_relay()
-    spawn("vite", ["node", str(ROOT / "plugin" / "node_modules" / "vite" / "bin" / "vite.js")], ROOT / "plugin")
+    start_vite()
+    start_sim()
+    print("Up: relay 8797 (ingest 8798, desktop 8799), vite 5180, simulator 9898. State:", STATE)
+
+
+def start_vite() -> None:
+    kill("vite")
+    # The dev build turns the phone page on; public builds leave it off.
+    spawn("vite", ["node", str(ROOT / "plugin" / "node_modules" / "vite" / "bin" / "vite.js")], ROOT / "plugin", {"VITE_DECK_PHONE": "1"})
     if not wait_for("http://127.0.0.1:5180/"):
         sys.exit("vite did not start; see C:/deck-sandbox/state/vite.log")
-    start_sim()
-    print("Up: relay 8797 (ingest 8798), vite 5180, simulator 9898. State:", STATE)
 
 
 def start_relay() -> None:
@@ -205,6 +211,8 @@ def main() -> None:
         seed()
     elif cmd == "sim":
         start_sim()
+    elif cmd == "vite":
+        start_vite()
     elif cmd == "nosim":
         kill("simulator", gentle=True)
     elif cmd == "hooks":
