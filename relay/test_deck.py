@@ -537,6 +537,71 @@ class Todos(unittest.TestCase):
             httpd.server_close()
 
 
+class Focus(DeckTest):
+    def test_rules_for_starting_focus(self):
+        self.assertIn("1 to 2", self.deck.set_focus([], 25))
+        self.assertIn("1 to 2", self.deck.set_focus(["rec", "hub", "rec"], 25))
+        self.assertIn("1 to 2", self.deck.set_focus(["rec", "rec"], 25))
+        self.assertEqual(self.deck.set_focus(["nope"], 25), "unknown project")
+        self.assertIn("25, 50", self.deck.set_focus(["rec"], 10))
+        focus = self.deck.set_focus(["rec", "hub"], None)
+        self.assertEqual((focus["projects"], focus["ends_at"], focus["left_s"]), (["rec", "hub"], None, None))
+
+    def test_focus_survives_a_relay_restart(self):
+        self.deck.set_focus(["rec"], 50)
+        again = D.Deck(self.home, self.deck.projects, FAKE_HOME, self.clock)
+        self.assertEqual((again.public_focus()["projects"], again.public_focus()["left_s"]), (["rec"], 3000))
+
+    def test_the_timer_ends_focus_with_a_summary(self):
+        self.deck.set_focus(["rec"], 25)
+        self.clock.t += 25 * 60 - 1
+        self.deck.sweep()
+        self.assertIsNotNone(self.deck.focus)
+        self.clock.t += 2
+        self.deck.sweep()
+        self.assertIsNone(self.deck.focus)
+        self.assertEqual((self.deck.last_summary["reason"], self.deck.last_summary["minutes"]), ("timer", 25))
+        self.assertFalse((self.home / "focus.json").exists())
+
+    def test_disarming_ends_focus(self):
+        self.deck.sweep(armed=True)
+        self.deck.set_focus(["rec"], None)
+        self.deck.sweep(armed=False)
+        self.assertEqual(self.deck.last_summary["reason"], "disarmed")
+
+    def test_scope_and_routing(self):
+        self.replay("claude-code", fixtures("claude-code")[:4])  # a rec session, working
+        self.deck.ingest("codex", {"hook_event_name": "SessionStart", "session_id": "h1", "cwd": "C:/deck-sandbox/hub"})
+        self.deck.ingest("codex", {"hook_event_name": "UserPromptSubmit", "session_id": "h1", "cwd": "C:/deck-sandbox/hub"})
+        self.deck.set_focus(["rec"], 25)
+        self.assertEqual([s["project"] for s in self.deck.session_list("focus")], ["rec"])
+        self.assertEqual(len(self.deck.session_list("all")), 2)
+        deck = self.deck.deck("focus")
+        self.assertEqual((deck["sessions"], deck["outside_focus"]), (1, {"active": 1, "waiting": 0}))
+        self.assertIsNone(self.deck.deck("all")["outside_focus"])
+        hub = {"agent": "codex", "name": "hub", "cwd": "C:/deck-sandbox/hub"}
+        rec = {"agent": "claude-code", "name": "rec", "cwd": "C:/deck-sandbox/rec"}
+        self.assertEqual(self.deck.gate_route(hub, "Bash"), "outside focus")
+        self.assertIsNone(self.deck.gate_route(rec, "Bash"))
+        self.assertEqual([p["pinned"] for p in self.deck.project_list()], [True, False])
+
+    def test_summary_counts_come_from_the_event_log(self):
+        self.deck.set_focus(["rec"], 25)
+        for status in ("approved", "denied", "approved"):
+            self.deck.emit("approval", request="r", project="rec", status=status)
+        self.deck.emit("approval", request="r", project="hub", status="approved")  # outside focus: not counted
+        self.deck.emit("run", run="x", project="rec", status="ok")
+        self.deck.emit("run", run="y", project="rec", status="running")
+        self.deck.emit("todo", todo="t", project="rec", status="done")
+        self.clock.t += 31 * 60
+        summary = self.deck.end_focus("ended")
+        self.assertEqual({k: summary[k] for k in ("minutes", "approved", "denied", "runs", "todos")},
+                         {"minutes": 31, "approved": 2, "denied": 1, "runs": 1, "todos": 1})
+        logged = [json.loads(l) for l in (self.home / "deck.log").read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(logged[-1]["type"], "focus_end")
+        self.assertEqual(logged[-1]["summary"], {k: summary[k] for k in ("minutes", "approved", "denied", "runs", "todos")})
+
+
 class Forwarder(unittest.TestCase):
     def test_slim_drops_text_and_patch_bodies(self):
         events = fixtures("codex")
