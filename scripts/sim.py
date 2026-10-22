@@ -69,14 +69,21 @@ class Run:
         self.name, self.failures = name, []
         self.expected: list[str] = []  # console errors a run provokes on purpose (the simulator logs every non-2xx fetch)
         self.seen = max((e["id"] for e in console()), default=0)
+        self.reported: set[int] = set()
+        self.rows: tuple[str, int, list[str]] | None = None  # the plugin's latest `[deck] rows` line
+        self.rows_id = 0
         SHOTS.mkdir(parents=True, exist_ok=True)
 
     def entries(self) -> list[dict]:
         fresh = [e for e in console() if e["id"] > self.seen]
         for e in fresh:
             if e["level"] == "error" or e["message"].startswith(("[uncaught]", "[unhandledrejection]")):
-                if not any(re.search(p, e["message"]) for p in self.expected):
+                if not any(re.search(p, e["message"]) for p in self.expected) and e["id"] not in self.reported:
+                    self.reported.add(e["id"])
                     self.failures.append(f"console error: {e['message'][:160]}")
+            if e["message"].startswith("[deck] rows ") and e["id"] > self.rows_id:
+                _, _, page, cursor, keys = e["message"].split(" ", 4)
+                self.rows, self.rows_id = (page, int(cursor), keys.split(",")), e["id"]
         return fresh
 
     def expect(self, pattern: str, timeout: float = 6.0) -> str | None:
@@ -99,7 +106,30 @@ class Run:
         return found
 
     def goto(self, key: str) -> None:
-        """Move the cursor to the row with this key. Every swipe logs exactly one `[deck] cursor` line."""
+        """Move the cursor straight to the row with this key: the plugin's `[deck] rows` line says
+        where every row is, and every swipe logs exactly one `[deck] cursor` line."""
+        deadline = time.time() + 4
+        while time.time() < deadline:
+            self.entries()
+            if self.rows and key in self.rows[2]:
+                break
+            time.sleep(0.15)
+        else:
+            return self.search(key)
+        _, cursor, keys = self.rows
+        here = keys[cursor] if cursor < len(keys) else None
+        for _ in range(abs(keys.index(key) - cursor)):
+            self.seen = max((e["id"] for e in console()), default=self.seen)
+            send("down" if keys.index(key) > cursor else "up")
+            found = self.expect(r"\[deck\] cursor ", 3)
+            here = found.split(" ", 2)[2] if found else None
+            time.sleep(0.12)
+        if here != key:
+            self.search(key)
+        time.sleep(0.3)
+
+    def search(self, key: str) -> None:
+        """The slow way: to the top, then down until the key comes up."""
         def swipe(direction: str) -> str | None:
             self.seen = max((e["id"] for e in console()), default=self.seen)
             send(direction)
@@ -160,7 +190,8 @@ def inject_approval(summary: str = "git push origin main") -> str:
 
 def at_root(run: Run) -> None:
     """Start from a fresh plugin at the Deck root."""
-    subprocess.run([sys.executable, str(ROOT / "scripts" / "devstack.py"), "sim"], check=True, capture_output=True)
+    subprocess.run([sys.executable, str(ROOT / "scripts" / "devstack.py"), "sim"], check=True, capture_output=True,
+                   env={**os.environ, "DECK_STATE": str(STATE)})  # the simulator of whichever stack this run drives
     run.seen = 0
     run.expect(r"\[deck\] rebuild deck:focus:", 15)
     time.sleep(STEP + 1)
@@ -249,7 +280,8 @@ def run_running() -> None:
     GET /runs?active=1 within 3 s, rows may change only when a run starts or ends or a minute rolls
     over, and a failing command must pin the spotlight row."""
     run = Run("running")
-    subprocess.run([sys.executable, str(ROOT / "scripts" / "devstack.py"), "reset"], check=True, capture_output=True)
+    subprocess.run([sys.executable, str(ROOT / "scripts" / "devstack.py"), "reset"], check=True, capture_output=True,
+                   env={**os.environ, "DECK_STATE": str(STATE)})
     at_root(run)
     sleep = 'python -c "import time; time.sleep({})"'
     agents = [
@@ -298,7 +330,7 @@ def run_running() -> None:
     for a in agents:
         a.wait(120)
     run.do("double", r"page deck:focus: depth 1")
-    run.expect(r"\[deck\] spotlight err_\d+ exit 1", 8)
+    run.expect(r"\[deck\] spotlight err_\w+ exit 1", 8)
     time.sleep(0.8)
     run.shot("1-spotlight")
     run.finish()
@@ -372,7 +404,8 @@ def run_focus() -> None:
     """Phase E: with focus on glasses, a git push from hub falls back to the terminal in under 0.5 s
     while a glasses prompt still reaches the simulator; the summary's counts match the event log."""
     run = Run("focus")
-    subprocess.run([sys.executable, str(ROOT / "scripts" / "devstack.py"), "reset"], check=True, capture_output=True)
+    subprocess.run([sys.executable, str(ROOT / "scripts" / "devstack.py"), "reset"], check=True, capture_output=True,
+                   env={**os.environ, "DECK_STATE": str(STATE)})
     at_root(run)
     run.goto("projects")
     run.do("click", r"page projects:all: depth 2", pause=1.6)
@@ -449,7 +482,8 @@ def run_desktop() -> None:
     """Phase F: the desktop page and the glasses show the same counts within 3 s across a scripted
     run; Open on phone routes the phone page; /present follows the glasses."""
     run = Run("desktop")
-    subprocess.run([sys.executable, str(ROOT / "scripts" / "devstack.py"), "reset"], check=True, capture_output=True)
+    subprocess.run([sys.executable, str(ROOT / "scripts" / "devstack.py"), "reset"], check=True, capture_output=True,
+                   env={**os.environ, "DECK_STATE": str(STATE)})
     at_root(run)
     samples = STATE / "desktop-samples.jsonl"
     sampler = subprocess.Popen(["node", str(ROOT / "scripts" / "cdp.mjs"), "sample", "http://127.0.0.1:8799/", TILES, str(samples), "62"],

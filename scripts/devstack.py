@@ -27,7 +27,7 @@ from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parent.parent
 SANDBOX = Path("C:/deck-sandbox")
-STATE = SANDBOX / "state"
+STATE = Path(os.environ.get("DECK_STATE", SANDBOX / "state"))  # scripts/demo_stage.py points this at the demo
 PROJECTS = {"glasses": SANDBOX / "glasses", "hub": SANDBOX / "hub"}
 SIM_EXE = ROOT / "plugin" / "node_modules" / "@evenrealities" / "sim-win32-x64" / "bin" / "evenhub-simulator.exe"
 PIDS = STATE / "devstack.json"

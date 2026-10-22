@@ -5,6 +5,7 @@
 //   node scripts/cdp.mjs shot <url> <out.png> [width] [height] [waitMs]
 //   node scripts/cdp.mjs eval <url> <expression> [waitMs]
 //   node scripts/cdp.mjs sample <url> <expression> <out.jsonl> <seconds>   # every 250 ms: {"t": ms, "v": value}
+//   node scripts/cdp.mjs record <url> <outdir> [w] [h] [scale] [seconds] [stopfile]   # screencast frames as <epoch-ms>.jpg
 import { spawn } from 'node:child_process'
 import { mkdirSync, writeFileSync, appendFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -102,8 +103,34 @@ try {
       await sleep(250)
     }
     done()
+  } else if (cmd === 'record') {
+    // Frames as <epoch-ms>.jpg, only when the page changes, until <stopfile> exists or the time is up.
+    const [outdir, w = '768', h = '540', scale = '1', seconds = '600', stopfile = ''] = rest
+    mkdirSync(outdir, { recursive: true })
+    const { s, done } = await open(url, Number(w), Number(h))
+    await s.send('Emulation.setDeviceMetricsOverride', { width: Number(w), height: Number(h), deviceScaleFactor: Number(scale), mobile: false })
+    await sleep(1500)
+    let frames = 0
+    const end = Date.now() + Number(seconds) * 1000
+    const { existsSync } = await import('node:fs')
+    await s.send('Page.startScreencast', { format: 'jpeg', quality: 92, everyNthFrame: 1 })
+    while (Date.now() < end && !(stopfile && existsSync(stopfile))) {
+      while (s.events.length) {
+        const e = s.events.shift()
+        if (e.method !== 'Page.screencastFrame') continue
+        const ts = Math.round((e.params.metadata.timestamp ?? Date.now() / 1000) * 1000)
+        writeFileSync(join(outdir, `${ts}.jpg`), Buffer.from(e.params.data, 'base64'))
+        frames++
+        s.send('Page.screencastFrameAck', { sessionId: e.params.sessionId }).catch(() => {})
+      }
+      await sleep(15)
+    }
+    await s.send('Page.stopScreencast').catch(() => {})
+    console.log(JSON.stringify({ outdir, frames }))
+    done()
   } else {
-    console.error('usage: shot <url> <out.png> [w] [h] [waitMs] | eval <url> <expr> [waitMs] | sample <url> <expr> <out.jsonl> <seconds>')
+    console.error('usage: shot <url> <out.png> [w] [h] [waitMs] | eval <url> <expr> [waitMs] | sample <url> <expr> <out.jsonl> <seconds>'
+      + ' | record <url> <outdir> [w] [h] [scale] [seconds] [stopfile]')
     process.exit(2)
   }
 } catch (err) {

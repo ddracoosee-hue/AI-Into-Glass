@@ -118,6 +118,7 @@ let result: { text: string; until: number } | null = null
 let summary: { s: FocusSummary; until: number } | null = null
 let focusSince: string | null = null // started_at of the focus block the last poll saw
 let lastCounts = ''
+let lastRows = ''
 let latest: Poll | null = null
 let rootDeck: DeckCounts | undefined
 const cache = new Map<string, Partial<Data> & { at: number }>()
@@ -234,6 +235,8 @@ function pagePaint(s: Screen, page: Page): Paint {
   page.cursor = kept >= 0 ? kept : Math.max(0, Math.min(page.cursor, s.rows.length - 1))
   page.cursorKey = s.rows[page.cursor]?.key
   page.top = windowFor(page.cursor, page.top, s.rows.length)
+  const rowsLine = `${s.key} ${page.cursor} ${s.rows.map(r => r.key).join(',') || '-'}`
+  if (rowsLine !== lastRows) console.debug('[deck] rows', (lastRows = rowsLine)) // lets sim runs move straight to a row
   const slots: Paint['slots'] = { bar: barSlot, note: { text: s.note, color: 1 }, hint: { text: s.hint, color: 2 } }
   for (let i = 0; i < VISIBLE_ROWS; i++) {
     const index = page.top + i
