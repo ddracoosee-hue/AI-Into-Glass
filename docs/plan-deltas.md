@@ -45,3 +45,33 @@ format; this file explains how the code got there.
   names and line counts. The glasses header names the agent, because two agents can share a folder.
 - **PowerShell.** The hook handles the `PowerShell` tool's commands, but the matcher stays `Bash|Write|Edit` as the plan says. Adding `PowerShell` is a one-word change in `scripts/install_hook.py --matcher`.
 - **The hook is not installed globally.** `python scripts/install_hook.py` does that, when you choose.
+
+# Command Deck (v2)
+
+Where the code differs from "Command Deck — Build Plan" (Oct 22, 2026), and why. The v1 rows above
+still hold. [contract.md](../contract.md), "Contract v2", is the source of truth for the wire format.
+
+## Before building (Oct 22, decided with Caleb)
+
+| The plan said | The code does | Why |
+|---|---|---|
+| Truncate with `even-toolkit` | Uses `@evenrealities/pretext` | It's the measurement engine `even-toolkit` wraps. It comes from Even Realities and has no dependencies. `even-toolkit` is a third-party React component library that pulls in recharts. |
+| Scratch and demo repos anywhere outside `H:\glasses` | `C:\deck-sandbox\` | `H:` is an exFAT drive. Codex's Windows sandbox needs NTFS ACLs, and git needs a `safe.directory` workaround for every repo there. |
+| Read `docs/approval-gate-plan.md` first | It doesn't exist | The v1 plan was never committed. contract.md, plan-deltas.md and the README carry it. |
+| "All 40 v1 tests" | 70: relay 23, hook 33, demo 6, plugin 8 | The count grew with the Codex support. All 70 must pass after every commit. |
+
+## Phase A: registry and ingest
+
+| # | The plan said | The code does | Why |
+|---|---|---|---|
+| A1 | The ingest token is the hook token | A third credential, `ingest.key` (`dik_…`), that can only post to ingest | Claude Code's `http` hooks take header values only from environment variables, and Claude Code exports those to the agent's own shell. With the hook token there, the agent could create gate requests. With `ingest.key` it can only post telemetry. |
+| A2 | `POST /ingest` answers 200 always | An empty 200 for the ingest key, including unparseable bodies; 401 without the key | A wrong key should be visible, not silently dropped. The body is always empty, because Claude Code reads a 2xx JSON body from an `http` hook as hook output. |
+| A3 | Ingest bodies max 64 KB | Up to 64 KB parsed; up to 64 MB read and skimmed for the event name, ids and target; past that the connection closes | Claude Code's PostToolUse carries the tool's output (`Edit` sends the whole original file), so real bodies often pass 64 KB. Dropping them would leave runs open forever. Nothing past 64 KB is ever parsed or kept. |
+| A4 | `http` hooks for every Claude Code event | Every event except SessionStart, which uses `hook/deck_ingest.py` (async, 2 s) | Claude Code doesn't run `http` hooks on SessionStart. |
+| A5 | Codex PostToolUse closes a run `ok` or `failed` | `ok`, or `failed` when the forwarder finds a test runner's failure summary in the output's last 4 KB | Codex's Bash PostToolUse carries stdout and no exit code; the fixtures show `sys.exit(3)` as `''`. The forwarder reads the output in memory and sends one flag. The output never leaves the hook. |
+| A6 | Record fixtures from one Claude Code and one Codex session | Done, plus five synthetic fixtures, labeled in `tests/fixtures/hooks/README.md` | `codex exec` runs with `approval: never` and never raises PermissionRequest. `idle_prompt` needs an interactive session, StopFailure needs an API error, and the recorded prompt never changed directory. |
+| A7 | (Codex run in a scratch repo) | The Codex fixtures were recorded with `-s danger-full-access` | The Codex Windows sandbox failed to start (`setup refresh had errors`): the running Codex desktop app holds `node_repl.exe`, which the sandbox setup tries to re-ACL. This matters for Phase G, where Codex runs the test suite. |
+| A8 | Agent identity not specified | `?agent=claude-code` or `?agent=codex` on the ingest URL | Neither agent names itself in its hook payloads. |
+| A9 | Endpoints for Deck, Sessions, Running, Projects, To-dos | Adds `GET /needs?scope=` | The Needs-you section needs a list, which the endpoint table had no row for. |
+| A10 | (Run lifecycle) | A permission still `waiting` when the same thread asks for another tool closes as `ended` | No hook reports a deny given in the terminal. An approved tool posts PostToolUse before its thread asks for anything else, so a new PreToolUse means the prompt was answered. A late PostToolUse corrects the inference. |
+| A11 | Nothing absolute leaves the PC | True for every v2 endpoint. v1's `/pending` still carries `session.cwd` as the hook sends it: home becomes `~`, but other drives stay absolute (`H:/glasses`) | v1 is frozen, and the plugin never displays `cwd`. |
