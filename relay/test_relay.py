@@ -93,7 +93,7 @@ class RoundTrip(RelayTest):
         self.assertEqual(headers["X-Gate-Session"], "hub")
         self.assertLessEqual(pending["expires_in"], 45)  # high risk
         t, result = self.wait_async(rid)
-        status, decided, _ = self.call(
+        status, _, _ = self.call(
             "POST", f"/requests/{rid}/decide", DEVICE_TOKEN, {"decision": "approve", "nonce": pending["nonce"]}
         )
         self.assertEqual(status, 200)

@@ -8,6 +8,23 @@ extend-exclude = ["plugin/node_modules", "tests/fixtures"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = [
+  "E731",   # one-line lambda helpers are the house style
+  "B905",   # zip(strict=...) would add a runtime check; not adopted
+  "RUF005", # list concatenation reads clearer than unpacking in these spots
+  "RUF007", # zip(a, a[1:]) is kept over itertools.pairwise
+  "SIM102", # nested ifs mirror the protocol's steps
+  "SIM105", # try/except/pass is kept over contextlib.suppress
+]
+# The glasses UI deliberately uses these glyphs.
+allowed-confusables = ["–", "›", "ℹ"]
+
+[tool.ruff.lint.pycodestyle]
+# The formatter wraps code at 120; long literals (prompts, regexes, ffmpeg filters) may run to 160.
+max-line-length = 160
+
+[tool.ruff.lint.per-file-ignores]
+"**/test_*.py" = ["RUF012"]  # test classes override plain class attributes
 
 [tool.ruff.lint.isort]
 # The relay, hook and script modules import their siblings by bare name.

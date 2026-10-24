@@ -119,7 +119,7 @@ def out_time(cut: list[dict], beat: str, raw: float) -> float:
 
 
 def srt_time(t: float) -> str:
-    ms = int(round(t * 1000))
+    ms = round(t * 1000)
     return f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}"
 
 
@@ -296,7 +296,7 @@ class Claude:
                             if isinstance(content, str)
                             else " ".join(c.get("text", "") for c in content or [] if isinstance(c, dict))
                         )
-                        lines = [l for l in text.splitlines() if l.strip()][:4] or ["(no output)"]
+                        lines = [ln for ln in text.splitlines() if ln.strip()][:4] or ["(no output)"]
                         cls = "bad" if part.get("is_error") else "result"
                         for i, line in enumerate(lines):
                             self.term.add(self.name, cls, f"  {'⎿' if i == 0 else ' '}  {line[:160]}")
@@ -676,7 +676,9 @@ def drive(record: bool) -> dict:
     finally:
         TAKE.mkdir(parents=True, exist_ok=True)
         for name in term.lines:  # for reading after a failed rehearsal
-            (TAKE / f"transcript-{name}.txt").write_text("\n".join(l["t"] for l in term.lines[name]), encoding="utf-8")
+            (TAKE / f"transcript-{name}.txt").write_text(
+                "\n".join(entry["t"] for entry in term.lines[name]), encoding="utf-8"
+            )
         hub.answer("deny", "Not now; the demo is over.")
         for session in (hub, glasses):
             session.close()

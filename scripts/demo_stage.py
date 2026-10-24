@@ -192,7 +192,10 @@ if __name__ == "__main__":
 
 REPOS = {
     "demo-glasses": {
-        "README.md": "# demo-glasses\n\nA tiny static site for notes you read on smart glasses.\n`python tools/render.py` renders `notes/*.md` into `build/`.\n",
+        "README.md": (
+            "# demo-glasses\n\nA tiny static site for notes you read on smart glasses.\n"
+            "`python tools/render.py` renders `notes/*.md` into `build/`.\n"
+        ),
         "TODO.md": "# TODO\n\n- [ ] README threat model\n- [ ] record demo, rm -r build step\n- [ ] tune row height\n- [ ] pair the phone\n",
         "tools/render.py": RENDER,
         ".gitignore": "build/\n__pycache__/\n",

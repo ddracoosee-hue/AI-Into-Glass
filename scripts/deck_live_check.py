@@ -175,7 +175,7 @@ def main() -> None:
         )
         print("  claude said:", out.stdout.strip()[:80], flush=True)
         time.sleep(2)
-        status, sessions = call("GET", "/sessions")
+        _, sessions = call("GET", "/sessions")
         _, runs = call("GET", "/runs")
         _, log = call("GET", "/events?since=0")
     finally:
@@ -191,7 +191,8 @@ def main() -> None:
     want = ["idle", "working", "waiting", "idle", "ended"]
     checks = {
         "the event log has idle, working, waiting, idle, ended": subsequence(want, recorded),
-        # In -p mode Stop and SessionEnd land ~0.1 s apart, so a poll can miss the last idle; it must agree with the log.
+        # In -p mode Stop and SessionEnd land ~0.1 s apart, so a poll can miss the last idle;
+        # it must agree with the log.
         "GET /sessions showed working, waiting, ended, in log order": subsequence(
             ["working", "waiting", "ended"], transitions
         )

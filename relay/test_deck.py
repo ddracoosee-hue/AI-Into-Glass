@@ -697,7 +697,7 @@ class Todos(unittest.TestCase):
         second = [t for t in self.deck.todo_list("all") if t["text"] == "record demo"][1]
         self.deck.mark_todo(second["id"])
         lines = (self.root / "TODO.md").read_text().splitlines()
-        self.assertEqual([l for l in lines if "record demo" in l], ["- [ ] record demo", "- [x] record demo"])
+        self.assertEqual([line for line in lines if "record demo" in line], ["- [ ] record demo", "- [x] record demo"])
 
     def test_an_edited_line_is_refused_and_nothing_changes(self):
         target = self.open_todos()["README threat model"]
@@ -821,7 +821,7 @@ class Focus(DeckTest):
             {k: summary[k] for k in ("minutes", "approved", "denied", "runs", "todos")},
             {"minutes": 31, "approved": 2, "denied": 1, "runs": 1, "todos": 1},
         )
-        logged = [json.loads(l) for l in (self.home / "deck.log").read_text(encoding="utf-8").splitlines()]
+        logged = [json.loads(line) for line in (self.home / "deck.log").read_text(encoding="utf-8").splitlines()]
         self.assertEqual(logged[-1]["type"], "focus_end")
         self.assertEqual(
             logged[-1]["summary"], {k: summary[k] for k in ("minutes", "approved", "denied", "runs", "todos")}

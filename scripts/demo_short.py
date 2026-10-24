@@ -21,9 +21,9 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import demo_run as R  # noqa: E402  (sets APPROVAL_GATE_HOME before sim loads)
-from demo_run import DEMO, GLASSES, HUB, OUT, FPS, sim  # noqa: E402
-from demo_stage import git  # noqa: E402
+import demo_run as R  # must come first: sets APPROVAL_GATE_HOME before sim loads
+from demo_run import DEMO, FPS, GLASSES, HUB, OUT, sim
+from demo_stage import git
 
 TAKE = DEMO / "take-short"
 FINAL = OUT / "command-deck-short.mp4"
@@ -139,7 +139,9 @@ def drive() -> dict:
     finally:
         TAKE.mkdir(parents=True, exist_ok=True)
         for name in term.lines:
-            (TAKE / f"transcript-{name}.txt").write_text("\n".join(l["t"] for l in term.lines[name]), encoding="utf-8")
+            (TAKE / f"transcript-{name}.txt").write_text(
+                "\n".join(entry["t"] for entry in term.lines[name]), encoding="utf-8"
+            )
         for session in (hub, glasses):
             session.close()
         if codex.proc.poll() is None:

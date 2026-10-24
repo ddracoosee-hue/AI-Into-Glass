@@ -505,7 +505,7 @@ class Deck:
         sess["current"] = {"tool": tool, "target": run["target"], "since": iso(t), "run": run["id"]}
         self.sp[sess["id"]]["perm_t"] = t
         self._state(sess, "waiting", "approval")
-        for rid, g in self.gate.items():  # the gate's own request may have arrived first
+        for g in self.gate.values():  # the gate's own request may have arrived first
             if (
                 g["session"] is None
                 and g["agent"] == sess["agent"]

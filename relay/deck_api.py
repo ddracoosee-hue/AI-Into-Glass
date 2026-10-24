@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from deck import Deck, OTHER
+from deck import OTHER, Deck
 
 MAX_INGEST = 64 * 1024  # parsed in full up to this size
 MAX_STREAM = 64 * 1024 * 1024  # larger bodies are read, skimmed and dropped; past this the connection closes

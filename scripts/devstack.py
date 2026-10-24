@@ -94,7 +94,7 @@ def prepare() -> None:
 
 
 def spawn(name: str, args: list[str], cwd: Path, extra: dict | None = None) -> int:
-    log = open(STATE / f"{name}.log", "w", encoding="utf-8")
+    log = open(STATE / f"{name}.log", "w", encoding="utf-8")  # noqa: SIM115  (the detached process keeps writing to it)
     proc = subprocess.Popen(
         args, cwd=cwd, env={**env(), **(extra or {})}, stdout=log, stderr=subprocess.STDOUT, creationflags=DETACHED
     )

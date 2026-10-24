@@ -21,12 +21,12 @@ scripts/demo.py imports this module and uses the same calls.
 
 import json
 import os
-import urllib.error
 import re
 import shutil
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -286,7 +286,9 @@ def deck_get(path: str):
 
 def agent(cmd: list[str], cwd: str) -> subprocess.Popen:
     """A real Claude Code or Codex session in a devstack project, with the dev state dir."""
-    log = open(STATE / f"agent-{Path(cwd).name}-{int(time.time() * 1000) % 100000}.log", "w", encoding="utf-8")
+    log = open(  # noqa: SIM115  (the agent process keeps writing to it)
+        STATE / f"agent-{Path(cwd).name}-{int(time.time() * 1000) % 100000}.log", "w", encoding="utf-8"
+    )
     return subprocess.Popen(
         cmd,
         cwd=cwd,
