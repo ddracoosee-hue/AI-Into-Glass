@@ -1,5 +1,7 @@
 # Command Deck
 
+[![CI](https://github.com/ddracoosee-hue/AI-Into-Glass/actions/workflows/ci.yml/badge.svg)](https://github.com/ddracoosee-hue/AI-Into-Glass/actions/workflows/ci.yml)
+
 Run your Claude Code and Codex sessions from Even Realities G2 glasses: see what is running and what
 needs you, approve or deny a prompt with a tap, and focus on one project while the rest wait in
 their terminals.
@@ -354,6 +356,14 @@ python -m unittest discover -s relay     # gate, registry, scrubbing, ingest, fo
 python -m unittest discover -s hook      # rules and redaction, plus the real hook against a live relay
 python -m unittest discover -s scripts   # demo cut, hardware checklist
 cd plugin; npm test; npx tsc --noEmit    # gestures, screens, pixel fitting, types
+```
+
+Style is enforced in CI. Python uses ruff, and TypeScript, JavaScript and CSS use prettier; settings live in
+`pyproject.toml` and `.prettierrc.json`:
+
+```powershell
+ruff check .; ruff format .              # lint, then format Python
+npx prettier --write .                   # format TS, JS and CSS
 ```
 
 The hook fixtures in `tests/fixtures/hooks/` are real Claude Code and Codex payloads with the home
