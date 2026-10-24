@@ -371,10 +371,12 @@ python scripts/demo_run.py                # rehearse: drive every beat and check
 python scripts/demo_stage.py --reset      # back to the start, in about 15 s
 python scripts/demo_run.py --record       # record, then cut into demo/
 python scripts/demo_run.py --cut          # re-cut after editing demo/captions.srt
+python scripts/demo_stage.py --reset; python scripts/demo_short.py   # the short, slow clip: Deck, Running, one approval
 python scripts/demo_stage.py --teardown
 ```
 
-`demo/` holds the video, `captions.srt`, six stills and `deck-loop.gif`. The glasses pane is the
+`demo/` holds the video, `captions.srt`, six stills, `deck-loop.gif` and `command-deck-short.mp4`
+(about 14 s, each screen held long enough to read). The glasses pane is the
 simulator's own framebuffer. The right-hand panes are Chrome screencasts of `/present`, the
 `TODO.md` file, and each agent's output stream. Nothing is captured from your screen. The raw take
 stays in `C:/deck-sandbox/demo/take`, and a take whose capture stalls fails its checks and is not cut.

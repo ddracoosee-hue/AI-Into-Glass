@@ -342,15 +342,16 @@ def pane_server(term: Terminal) -> ThreadingHTTPServer:
 class Capture:
     """The simulator's framebuffer and three Chrome screencasts, each frame named by its epoch ms."""
 
-    def __init__(self):
-        if TAKE.exists():
-            shutil.rmtree(TAKE)
-        (TAKE / "glasses").mkdir(parents=True)
-        self.stopfile = TAKE / "stop"
+    def __init__(self, take: Path = TAKE):
+        self.take = take
+        if take.exists():
+            shutil.rmtree(take)
+        (take / "glasses").mkdir(parents=True)
+        self.stopfile = take / "stop"
         self.stop = threading.Event()
         self.late: list[tuple[float, float]] = []  # (from, to): the framebuffer went unread, and changed meanwhile
         cdp = ["node", str(ROOT / "scripts" / "cdp.mjs"), "record"]
-        self.casts = [subprocess.Popen([*cdp, url, str(TAKE / name), w, h, "1", "900", str(self.stopfile)],
+        self.casts = [subprocess.Popen([*cdp, url, str(take / name), w, h, "1", "900", str(self.stopfile)],
                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                       for name, url, w, h in (("terminal", f"http://127.0.0.1:{PANE_PORT}/terminal", "768", "540"),
                                               ("present", "http://127.0.0.1:8799/present", "1536", "1080"),
@@ -369,7 +370,7 @@ class Capture:
                 if png != last:
                     if now - since > 0.5:  # this change reaches the video up to that much late
                         self.late.append((since, now))
-                    (TAKE / "glasses" / f"{int(now * 1000)}.png").write_bytes(png)
+                    (self.take / "glasses" / f"{int(now * 1000)}.png").write_bytes(png)
                     last = png
             except OSError:
                 pass
@@ -381,7 +382,7 @@ class Capture:
         for p in self.casts:
             p.wait(30)
         self.thread.join(5)
-        subprocess.run(["node", str(ROOT / "scripts" / "cdp.mjs"), "shot", f"http://127.0.0.1:{PANE_PORT}/card", str(TAKE / "card.png"),
+        subprocess.run(["node", str(ROOT / "scripts" / "cdp.mjs"), "shot", f"http://127.0.0.1:{PANE_PORT}/card", str(self.take / "card.png"),
                         "1920", "1080", "1500"], capture_output=True, timeout=60)
 
 
@@ -611,6 +612,22 @@ def frames_to_video(folder: Path, t0_ms: int, t1_ms: int, out: Path, size: str, 
        "-c:v", "libx264", "-preset", "veryfast", "-crf", "14", "-r", str(FPS), str(out))
 
 
+def compose(work: Path, pane: str, s: float, e: float, caption: Path, out: Path) -> None:
+    """One window of the take, s to e seconds in: the glasses on the left, the terminal over `pane`
+    on the right, and the caption burned in. Reads the pane videos frames_to_video left in `work`."""
+    span = ["-ss", f"{s:.3f}", "-t", f"{e - s:.3f}"]
+    label = "Even Hub simulator · G2 display"
+    ff(*span, "-i", str(work / "glasses.mp4"), *span, "-i", str(work / "terminal.mp4"), *span, "-i", str(work / f"{pane}.mp4"),
+       "-filter_complex",
+       f"color=c=0x070b08:s=1920x1080:r={FPS}:d={e - s:.3f}[bg];"
+       "[bg][0:v]overlay=0:252[a];[a][1:v]overlay=1152:0[b];[b][2:v]overlay=1152:540[c];"
+       "[c]drawbox=x=1150:y=0:w=2:h=1080:color=0x22362a:t=fill,drawbox=x=1152:y=539:w=768:h=2:color=0x22362a:t=fill,"
+       f"drawtext=fontfile='{FONT}':text='{label}':fontsize=30:fontcolor=0x9bb8a3:x=(1152-text_w)/2:y=190,"
+       f"drawtext=fontfile='{FONT_BOLD}':textfile='{caption.as_posix().replace(':', chr(92) + ':')}':fontsize=46:fontcolor=white:"
+       "box=1:boxcolor=black@0.7:boxborderw=22:x=(w-text_w)/2:y=h-170[v]",
+       "-map", "[v]", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-pix_fmt", "yuv420p", "-r", str(FPS), str(out))
+
+
 def cut(take: dict) -> None:
     marks = take["marks"]
     t0 = int(take["start_ms"])
@@ -643,17 +660,7 @@ def cut(take: dict) -> None:
             continue
         for j, (s, e) in enumerate(beat["segments"]):
             out = work / f"beat-{i:02d}-{j}.mp4"
-            span = ["-ss", f"{s:.3f}", "-t", f"{e - s:.3f}"]
-            label = "Even Hub simulator · G2 display"
-            ff(*span, "-i", str(work / "glasses.mp4"), *span, "-i", str(work / "terminal.mp4"), *span, "-i", str(work / f"{beat['pane']}.mp4"),
-               "-filter_complex",
-               f"color=c=0x070b08:s=1920x1080:r={FPS}:d={e - s:.3f}[bg];"
-               "[bg][0:v]overlay=0:252[a];[a][1:v]overlay=1152:0[b];[b][2:v]overlay=1152:540[c];"
-               "[c]drawbox=x=1150:y=0:w=2:h=1080:color=0x22362a:t=fill,drawbox=x=1152:y=539:w=768:h=2:color=0x22362a:t=fill,"
-               f"drawtext=fontfile='{FONT}':text='{label}':fontsize=30:fontcolor=0x9bb8a3:x=(1152-text_w)/2:y=190,"
-               f"drawtext=fontfile='{FONT_BOLD}':textfile='{caption.as_posix().replace(':', chr(92) + ':')}':fontsize=46:fontcolor=white:"
-               "box=1:boxcolor=black@0.7:boxborderw=22:x=(w-text_w)/2:y=h-170[v]",
-               "-map", "[v]", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-pix_fmt", "yuv420p", "-r", str(FPS), str(out))
+            compose(work, beat["pane"], s, e, caption, out)
             pieces.append(out)
     listing = work / "pieces.txt"
     listing.write_text("\n".join(f"file '{p.as_posix()}'" for p in pieces))
