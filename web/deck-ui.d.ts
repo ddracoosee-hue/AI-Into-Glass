@@ -1,7 +1,7 @@
 // Types for deck-ui.js, so the plugin (TypeScript) can mount the same UI as the desktop page.
 export interface DeckApi {
-  get(path: string): Promise<any>
-  events(since: number, wait: number): Promise<{ events: any[]; cursor: number; reset?: boolean } | null>
+  get(path: string): Promise<unknown>
+  events(since: number, wait: number): Promise<{ events: unknown[]; cursor: number; reset?: boolean } | null>
 }
 export interface Route {
   view: string

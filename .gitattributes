@@ -1,0 +1,16 @@
+# Normalize line endings; the to-do and scrubbing tests hash file contents byte for byte.
+* text=auto eol=lf
+*.py text
+*.ts text
+*.js text
+*.mjs text
+*.css text
+*.html text
+*.md text
+*.json text
+*.srt text
+
+# Media is binary: never diffed or converted.
+*.png binary
+*.gif binary
+*.mp4 binary
