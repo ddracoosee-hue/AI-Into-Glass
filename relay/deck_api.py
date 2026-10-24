@@ -3,6 +3,7 @@
 The phone API answers only paired devices. Ingest answers only the ingest key, and only on a port
 `tailscale serve` never exposes. Stdlib only. Endpoints: contract.md, "Contract v2".
 """
+
 from __future__ import annotations
 
 import hmac
@@ -15,13 +16,22 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from deck import Deck, OTHER
 
-MAX_INGEST = 64 * 1024        # parsed in full up to this size
+MAX_INGEST = 64 * 1024  # parsed in full up to this size
 MAX_STREAM = 64 * 1024 * 1024  # larger bodies are read, skimmed and dropped; past this the connection closes
 HEAD, TAIL = 16 * 1024, 4 * 1024
 LIST_ROWS = 20  # the glasses list limit; `limit` raises it for the desktop page
 EVENTS_WAIT = 25
-SKIM = ("session_id", "hook_event_name", "cwd", "tool_name", "agent_id", "agent_type", "notification_type", "model",
-        "session_title")
+SKIM = (
+    "session_id",
+    "hook_event_name",
+    "cwd",
+    "tool_name",
+    "agent_id",
+    "agent_type",
+    "notification_type",
+    "model",
+    "session_title",
+)
 SKIM_INPUT = ("command", "file_path", "notebook_path", "pattern", "subagent_type")
 
 
@@ -74,7 +84,17 @@ def handle(h, method: str, path: str, query: str, desktop: bool = False) -> bool
     deck: Deck = h.relay.deck
     q = parse_qs(query)
     parts = [unquote(p) for p in path.strip("/").split("/")]
-    if not parts or parts[0] not in ("deck", "needs", "sessions", "runs", "projects", "todos", "focus", "events", "view"):
+    if not parts or parts[0] not in (
+        "deck",
+        "needs",
+        "sessions",
+        "runs",
+        "projects",
+        "todos",
+        "focus",
+        "events",
+        "view",
+    ):
         return False
     if desktop and method != "GET":
         h.reply(405, {"error": "the desktop page is read-only"})
@@ -118,7 +138,9 @@ def handle(h, method: str, path: str, query: str, desktop: bool = False) -> bool
         h.reply(200, found) if found else h.reply(404, {"error": "unknown project"})
     elif route == ("POST", "todos", 3) and parts[2] == "done":
         done = deck.mark_todo(parts[1])
-        h.reply(200, done) if done else h.reply(409, {"error": "not an open line in a configured to-do file, or it changed"})
+        h.reply(200, done) if done else h.reply(
+            409, {"error": "not an open line in a configured to-do file, or it changed"}
+        )
     elif route == ("POST", "view", 1):
         shown = deck.view((h.read_json() or {}).get("route"))
         h.reply(200, {"route": shown}) if shown else h.reply(400, {"error": "route must name a deck view"})
@@ -156,14 +178,20 @@ def handle(h, method: str, path: str, query: str, desktop: bool = False) -> bool
 
 WEB = Path(__file__).resolve().parent.parent / "web"
 PAGES = {"/": "index.html", "/present": "present.html"}
-STATIC = {"deck-ui.js": "text/javascript; charset=utf-8", "deck-ui.css": "text/css; charset=utf-8",
-          "desktop.js": "text/javascript; charset=utf-8", "present.js": "text/javascript; charset=utf-8",
-          "favicon.svg": "image/svg+xml"}
+STATIC = {
+    "deck-ui.js": "text/javascript; charset=utf-8",
+    "deck-ui.css": "text/css; charset=utf-8",
+    "desktop.js": "text/javascript; charset=utf-8",
+    "present.js": "text/javascript; charset=utf-8",
+    "favicon.svg": "image/svg+xml",
+}
 DESKTOP_HOSTS = ("127.0.0.1", "localhost")
 SECURITY_HEADERS = {
     "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; "
-                               "frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
-    "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "Cache-Control": "no-store",
+    "frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Cache-Control": "no-store",
 }
 
 
@@ -173,6 +201,7 @@ class DesktopHandler(BaseHTTPRequestHandler):
     It is loopback-only and read-only. A Host header that isn't this machine's loopback name is
     refused, so a web page can't reach it through DNS rebinding, and there are no CORS headers, so
     another origin can't read its answers."""
+
     relay = None  # set by relay.make_desktop_server
     server_version = "CommandDeckDesktop/2"
 
@@ -180,8 +209,12 @@ class DesktopHandler(BaseHTTPRequestHandler):
         pass
 
     def reply(self, code: int, body: dict | None = None, headers: dict | None = None) -> None:
-        self.send_bytes(code, b"" if body is None else json.dumps(body, ensure_ascii=False).encode(),
-                        "application/json; charset=utf-8", headers)
+        self.send_bytes(
+            code,
+            b"" if body is None else json.dumps(body, ensure_ascii=False).encode(),
+            "application/json; charset=utf-8",
+            headers,
+        )
 
     def send_bytes(self, code: int, data: bytes, ctype: str, headers: dict | None = None) -> None:
         try:
@@ -199,6 +232,7 @@ class DesktopHandler(BaseHTTPRequestHandler):
     def client_gone(self) -> bool:
         import select
         import socket
+
         try:
             readable, _, _ = select.select([self.connection], [], [], 0)
             return bool(readable) and self.connection.recv(1, socket.MSG_PEEK) == b""
@@ -230,6 +264,7 @@ class DesktopHandler(BaseHTTPRequestHandler):
 class IngestHandler(BaseHTTPRequestHandler):
     """POST /ingest?agent=claude-code|codex. Always an empty 200 for the ingest key: a Claude Code
     http hook reads a JSON body as hook output, and telemetry must never decide anything."""
+
     deck: Deck
     key: str
     server_version = "CommandDeckIngest/2"
@@ -276,7 +311,9 @@ class IngestHandler(BaseHTTPRequestHandler):
         else:
             self.close_connection = True
         try:  # in-memory work, well under a millisecond, so the answer can wait for it
-            self.deck.ingest(agent, event) if event is not None else self.deck.log_error("unparseable or oversized ingest body")
+            self.deck.ingest(agent, event) if event is not None else self.deck.log_error(
+                "unparseable or oversized ingest body"
+            )
         except Exception as err:  # a malformed event must never take the listener down
             self.deck.log_error(f"ingest failed: {type(err).__name__}")
         self.answer(200)
@@ -290,7 +327,7 @@ class IngestHandler(BaseHTTPRequestHandler):
                     break
                 left -= len(chunk)
                 if len(head) < HEAD:
-                    head += chunk[:HEAD - len(head)]
+                    head += chunk[: HEAD - len(head)]
                 tail = (tail + chunk)[-TAIL:]
         except OSError:
             return None

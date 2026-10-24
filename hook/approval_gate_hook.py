@@ -13,6 +13,7 @@ Stdlib only; run with `python -I`. Registered by scripts/install_hook.py:
     "PermissionRequest": [{"matcher": "Bash|Write|Edit", "hooks": [{"type": "command",
         "command": "<python.exe>", "args": ["-I", "<repo>/hook/approval_gate_hook.py"], "timeout": 100}]}]
 """
+
 from __future__ import annotations
 
 import json
@@ -34,7 +35,10 @@ DENY_COMMAND = [
     (r"\brm\s+(\S+\s+)*-[a-z]*(r[a-z]*f|f[a-z]*r)", "rm -rf"),
     (r"\brm\s+(\S+\s+)*(-[a-z]*r[a-z]*|--recursive)\s+(\S+\s+)*(-[a-z]*f[a-z]*|--force)\b", "rm -rf"),
     (r"\brm\s+(\S+\s+)*(-[a-z]*f[a-z]*|--force)\s+(\S+\s+)*(-[a-z]*r[a-z]*|--recursive)\b", "rm -rf"),
-    (r"\bremove-item\b.*-r(ecurse)?\b.*-fo(rce)?\b|\bremove-item\b.*-fo(rce)?\b.*-r(ecurse)?\b", "Remove-Item -Recurse -Force"),
+    (
+        r"\bremove-item\b.*-r(ecurse)?\b.*-fo(rce)?\b|\bremove-item\b.*-fo(rce)?\b.*-r(ecurse)?\b",
+        "Remove-Item -Recurse -Force",
+    ),
     (r"\b(rd|rmdir)\s+/s\b|\b(del|erase)\s+(\S+\s+)*/s\b", "recursive delete"),
     (r"\bgit\s+push\b.*(\s--force\b|\s-f\b|\s--force-with-lease\b|\s--mirror\b|\s\+\S)", "git push --force"),
     (r"\bgit\s+(reset\s+--hard|clean\s+-[a-z]*f)", "discards work"),
@@ -48,7 +52,9 @@ DENY_COMMAND = [
 SENSITIVE_PATH = re.compile(
     r"\.ssh\b|(^|[\\/\s'\"=:])\.env(rc)?(\.[\w.-]+)?($|[\s'\"\\/;|&)])|settings(\.local)?\.json|"
     r"\.claude[\\/]|approval[-_]gate|\.git[\\/](hooks|config)|\.aws\b|\.gnupg\b|\.npmrc|\.pypirc|\.netrc|"
-    r"\bid_(rsa|ed25519|ecdsa)\b|credentials", re.I)
+    r"\bid_(rsa|ed25519|ecdsa)\b|credentials",
+    re.I,
+)
 
 # Risk for everything that is allowed through. Any high segment makes the whole command high.
 HIGH = re.compile(
@@ -57,16 +63,23 @@ HIGH = re.compile(
     r"\b(curl|wget|ssh|scp|sftp|rsync|nc|ncat|telnet|ftp|invoke-webrequest|invoke-restmethod|iwr|irm)\b|"
     r"\b(npm|pnpm|yarn)\s+publish\b|\b(twine\s+upload|cargo\s+publish|docker\s+push|gh\s+release|gh\s+pr\s+merge)\b|"
     r"\b(kill|pkill|taskkill|stop-process|shutdown|reboot|chmod|chown|icacls|takeown|reg\s+(add|delete))\b|"
-    r"\b(terraform\s+(apply|destroy)|kubectl\s+(apply|delete)|docker\s+(rm|rmi|system\s+prune))\b", re.I)
+    r"\b(terraform\s+(apply|destroy)|kubectl\s+(apply|delete)|docker\s+(rm|rmi|system\s+prune))\b",
+    re.I,
+)
 READ_ONLY = re.compile(
     r"^(git\s+(status|diff|log|show|branch|remote\s+-v|rev-parse|ls-files|blame)\b|"
     r"(ls|dir|cat|type|head|tail|wc|grep|rg|pwd|which|where|echo|tree|stat|file|du|df|whoami|date|get-childitem|"
     r"get-content|get-location|select-string)\b|"
     r"(npm|pnpm|yarn)\s+(test|run\s+test|run\s+lint|ls|list|outdated)\b|(pytest|python\s+-m\s+(pytest|unittest))\b|"
-    r"(go|cargo)\s+(test|check|vet)\b|tsc\s+--noEmit\b)", re.I)
+    r"(go|cargo)\s+(test|check|vet)\b|tsc\s+--noEmit\b)",
+    re.I,
+)
 SECRETS = [
     (r"\bsk-(ant-)?[A-Za-z0-9_-]{16,}", "[secret]"),
-    (r"\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|AKIA[0-9A-Z]{16}|xox[abpr]-[A-Za-z0-9-]{10,}|AIza[\w-]{30,})", "[secret]"),
+    (
+        r"\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|AKIA[0-9A-Z]{16}|xox[abpr]-[A-Za-z0-9-]{10,}|AIza[\w-]{30,})",
+        "[secret]",
+    ),
     (r"\beyJ[\w-]{10,}\.[\w-]{10,}\.[\w-]+", "[secret]"),
     (r"(?i)\b(\w*(token|secret|passw(or)?d|api_?key|auth)\w*)\s*=\s*('[^']*'|\"[^\"]*\"|\S+)", r"\1=[secret]"),
     (r"(?i)(authorization:\s*(bearer|basic|token)\s+)[^\s'\"]+", r"\1[secret]"),
@@ -106,7 +119,7 @@ def redact(text: str) -> str:
 def clip(text: str, limit: int, keep_tail: bool = False) -> str:
     if len(text) <= limit:
         return text
-    return "…" + text[-(limit - 1):] if keep_tail else text[:limit - 1] + "…"
+    return "…" + text[-(limit - 1) :] if keep_tail else text[: limit - 1] + "…"
 
 
 def display_path(path: str, cwd: str) -> str:
@@ -180,7 +193,7 @@ def patch_files(patch: str) -> list[list]:
         if m := PATCH_FILE.match(line):
             files.append([m[1], m[2], 0, 0])
         elif line.startswith("*** Move to: ") and files:
-            files.append(["Move", line[len("*** Move to: "):].strip(), 0, 0])
+            files.append(["Move", line[len("*** Move to: ") :].strip(), 0, 0])
         elif files and line.startswith("+") and not line.startswith("+++"):
             files[-1][2] += 1
         elif files and line.startswith("-") and not line.startswith("---"):
@@ -234,9 +247,11 @@ def describe_file(tool: str, tool_input: dict, cwd: str) -> tuple[dict | None, s
         what = f"{len(tool_input.get('edits') or [])} edits"
     else:
         what = f"notebook cell {tool_input.get('edit_mode') or 'replace'}"
-    return {"summary": clip(f"{tool} {shown}", SUMMARY_MAX, keep_tail=True),
-            "detail": clip(f"{what} · {shown}", DETAIL_MAX, keep_tail=True),
-            "risk": "medium" if inside(path, cwd) else "high"}, ""
+    return {
+        "summary": clip(f"{tool} {shown}", SUMMARY_MAX, keep_tail=True),
+        "detail": clip(f"{what} · {shown}", DETAIL_MAX, keep_tail=True),
+        "risk": "medium" if inside(path, cwd) else "high",
+    }, ""
 
 
 def build_request(event: dict, agent: str = "claude-code") -> tuple[dict | None, str]:
@@ -246,8 +261,9 @@ def build_request(event: dict, agent: str = "claude-code") -> tuple[dict | None,
         return None, "malformed event"
     if tool in ("Bash", "PowerShell"):
         command = shell_command(tool_input.get("command"))
-        described, reason = (describe_command(command) if command is not None
-                             else (None, f"unreadable command ({shape(tool_input)})"))
+        described, reason = (
+            describe_command(command) if command is not None else (None, f"unreadable command ({shape(tool_input)})")
+        )
     elif tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
         described, reason = describe_file(tool, tool_input, cwd)
     elif tool == "apply_patch":
@@ -257,7 +273,11 @@ def build_request(event: dict, agent: str = "claude-code") -> tuple[dict | None,
     if described is None:
         return None, reason
     name = os.environ.get("APPROVAL_GATE_SESSION") or os.path.basename(cwd.rstrip("\\/")) or "session"
-    session = {"agent": agent, "name": clip(redact(name), 40), "cwd": clip(redact(cwd).replace("\\", "/"), 200, keep_tail=True)}
+    session = {
+        "agent": agent,
+        "name": clip(redact(name), 40),
+        "cwd": clip(redact(cwd).replace("\\", "/"), 200, keep_tail=True),
+    }
     return {"session": session, "tool": tool, **described}, ""
 
 
@@ -283,6 +303,7 @@ def log_summary(event: dict) -> str:
 
 def append_log(home: Path, **fields) -> None:
     from datetime import datetime
+
     line = json.dumps({"ts": datetime.now().astimezone().isoformat(timespec="seconds"), **fields}, ensure_ascii=False)
     with open(home / "gate.log", "a", encoding="utf-8") as f:
         f.write(line + "\n")
@@ -291,11 +312,16 @@ def append_log(home: Path, **fields) -> None:
 def ask_relay(home: Path, request: dict) -> dict | None:
     """POST the request, long-poll for its outcome. Any failure returns None."""
     import urllib.request
+
     url = json.loads((home / "relay.json").read_text())["url"].rstrip("/")
     auth = {"Authorization": f"Bearer {(home / 'hook.key').read_text().strip()}"}
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # never route the gate through a proxy
-    post = urllib.request.Request(f"{url}/requests", data=json.dumps(request).encode(), method="POST",
-                                  headers={**auth, "Content-Type": "application/json"})
+    post = urllib.request.Request(
+        f"{url}/requests",
+        data=json.dumps(request).encode(),
+        method="POST",
+        headers={**auth, "Content-Type": "application/json"},
+    )
     with opener.open(post, timeout=5) as resp:
         rid = json.load(resp).get("id")
     if not isinstance(rid, str) or not ID_RE.fullmatch(rid):
@@ -323,8 +349,11 @@ def decide(event: dict, home: Path, agent: str = "claude-code") -> dict | None:
         return {"behavior": "allow"}
     if final.get("status") == "denied" and final.get("decision") == "deny":
         device = final.get("decided_by") if isinstance(final.get("decided_by"), str) else "a paired device"
-        return {"behavior": "deny", "message": f"The user denied this from Approval Gate on their glasses ({device}). "
-                                               "Do not retry it; continue without it or ask the user."}
+        return {
+            "behavior": "deny",
+            "message": f"The user denied this from Approval Gate on their glasses ({device}). "
+            "Do not retry it; continue without it or ask the user.",
+        }
     return None
 
 
@@ -341,7 +370,9 @@ def main() -> None:
     except Exception:
         return
     if decision:
-        sys.stdout.write(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}}))
+        sys.stdout.write(
+            json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}})
+        )
 
 
 if __name__ == "__main__":

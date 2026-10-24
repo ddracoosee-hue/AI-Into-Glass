@@ -8,6 +8,7 @@ on spare ports (18797 phone API, 18798 ingest), and the scratch repo is C:/deck-
 bare origin next to it. Hooks go in that repo's .claude/ only. A stand-in for the glasses polls
 /pending and approves the one request after 2 s, so the session spends real time in `waiting`.
 """
+
 from __future__ import annotations
 
 import json
@@ -30,8 +31,10 @@ REPO, ORIGIN = SANDBOX / "live", SANDBOX / "live-origin.git"
 MARKER = ".command-deck-scratch"
 PORT, INGEST_PORT = 18797, 18798
 TOKEN = "agt_live-check-device"
-PROMPT = ("This is a scratch repo for a hook test. Run exactly one Bash command, `git push origin main`, "
-          "then reply with the single word: done.")
+PROMPT = (
+    "This is a scratch repo for a hook test. Run exactly one Bash command, `git push origin main`, "
+    "then reply with the single word: done."
+)
 ABSOLUTE = re.compile(r"[A-Za-z]:[\\/]|(^|[\s'\"=])/[A-Za-z]/|users[\\/]", re.I)
 
 
@@ -44,9 +47,11 @@ def run(*args, cwd=None, env=None, timeout=60) -> str:
 
 def rmtree(path: Path) -> None:
     """Git marks its object files read-only on Windows."""
+
     def unlock(func, name, _):
         os.chmod(name, stat.S_IWRITE)
         func(name)
+
     shutil.rmtree(path, onexc=unlock)
 
 
@@ -60,16 +65,24 @@ def make_repo() -> None:
     run("git", "init", "-q", "-b", "main", str(REPO))
     (REPO / MARKER).write_text("created by scripts/deck_live_check.py\n")
     (REPO / "README.md").write_text("# live\n")
-    for args in (("config", "user.email", "demo@example.com"), ("config", "user.name", "Demo"), ("add", "-A"),
-                 ("commit", "-qm", "Initial commit"), ("remote", "add", "origin", ORIGIN.as_posix())):
+    for args in (
+        ("config", "user.email", "demo@example.com"),
+        ("config", "user.name", "Demo"),
+        ("add", "-A"),
+        ("commit", "-qm", "Initial commit"),
+        ("remote", "add", "origin", ORIGIN.as_posix()),
+    ):
         run("git", *args, cwd=REPO)
     (REPO / ".git" / "info" / "exclude").write_text(f".claude/\n{MARKER}\n")
 
 
 def call(method: str, path: str, body=None, port=PORT):
-    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", method=method,
-                                 data=json.dumps(body).encode() if body is not None else None,
-                                 headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"})
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}{path}",
+        method=method,
+        data=json.dumps(body).encode() if body is not None else None,
+        headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"},
+    )
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
             text = resp.read()
@@ -88,11 +101,26 @@ def main() -> None:
     env = {**os.environ, "APPROVAL_GATE_HOME": str(home)}
     sys.path.insert(0, str(ROOT / "relay"))
     import relay as R
+
     R.save_devices(home, {"dev_live01": {"label": "live check", "sha256": R.sha256(TOKEN), "created_at": R.now_iso()}})
     config = home / "deck.projects.json"
     config.write_text(json.dumps({"projects": [{"id": "live", "name": "live", "root": REPO.as_posix()}]}))
-    relay = subprocess.Popen([sys.executable, str(ROOT / "relay" / "relay.py"), "--port", str(PORT), "--ingest-port", str(INGEST_PORT),
-                              "--projects", str(config)], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    relay = subprocess.Popen(
+        [
+            sys.executable,
+            str(ROOT / "relay" / "relay.py"),
+            "--port",
+            str(PORT),
+            "--ingest-port",
+            str(INGEST_PORT),
+            "--projects",
+            str(config),
+        ],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
     transitions: list[str] = []
     stop = threading.Event()
     approved: list[str] = []
@@ -101,8 +129,16 @@ def main() -> None:
             if call("GET", "/health")[0] == 200:
                 break
             time.sleep(0.1)
-        run(sys.executable, str(ROOT / "scripts" / "install_hook.py"), "--deck", "--ingest-port", str(INGEST_PORT),
-            "--settings", str(REPO / ".claude" / "settings.json"), env=env)
+        run(
+            sys.executable,
+            str(ROOT / "scripts" / "install_hook.py"),
+            "--deck",
+            "--ingest-port",
+            str(INGEST_PORT),
+            "--settings",
+            str(REPO / ".claude" / "settings.json"),
+            env=env,
+        )
         run(sys.executable, str(ROOT / "relay" / "gatectl.py"), "arm", env=env)
 
         def glasses() -> None:  # polls like the plugin; approves the first prompt after 2 s on screen
@@ -129,8 +165,14 @@ def main() -> None:
         for target in (glasses, watch):
             threading.Thread(target=target, daemon=True).start()
         print("claude -p running in", REPO, flush=True)
-        out = subprocess.run(["claude", "-p", PROMPT, "--setting-sources", "project,local", "--model", "sonnet"],
-                             cwd=REPO, env=env, capture_output=True, text=True, timeout=300)
+        out = subprocess.run(
+            ["claude", "-p", PROMPT, "--setting-sources", "project,local", "--model", "sonnet"],
+            cwd=REPO,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
         print("  claude said:", out.stdout.strip()[:80], flush=True)
         time.sleep(2)
         status, sessions = call("GET", "/sessions")
@@ -143,13 +185,17 @@ def main() -> None:
     pushed = run("git", "ls-remote", ORIGIN.as_posix(), "refs/heads/main").strip() != ""
     sess = sessions["items"][0] if sessions and sessions["items"] else {}
     blob = json.dumps({"sessions": sessions, "runs": runs})
-    recorded = [e["state"] for e in (log or {}).get("events", []) if e["type"] == "session" and e["session"] == sess.get("id")]
+    recorded = [
+        e["state"] for e in (log or {}).get("events", []) if e["type"] == "session" and e["session"] == sess.get("id")
+    ]
     want = ["idle", "working", "waiting", "idle", "ended"]
     checks = {
         "the event log has idle, working, waiting, idle, ended": subsequence(want, recorded),
         # In -p mode Stop and SessionEnd land ~0.1 s apart, so a poll can miss the last idle; it must agree with the log.
-        "GET /sessions showed working, waiting, ended, in log order": subsequence(["working", "waiting", "ended"], transitions)
-                                                                       and subsequence(transitions, recorded),
+        "GET /sessions showed working, waiting, ended, in log order": subsequence(
+            ["working", "waiting", "ended"], transitions
+        )
+        and subsequence(transitions, recorded),
         "the glasses stand-in approved one request": len(approved) == 1,
         "the push reached origin": pushed,
         "the session counted the approval": sess.get("counts", {}).get("approved") == 1,

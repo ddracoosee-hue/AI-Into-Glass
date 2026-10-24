@@ -1,12 +1,18 @@
 """Every `HARDWARE:` comment in the code has a row in docs/hardware-checklist.md.
 Run: python -m unittest discover -s scripts"""
+
 import re
 import unittest
 from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCES = [*(ROOT / "plugin" / "src").glob("*.ts"), *(ROOT / "relay").glob("*.py"), *(ROOT / "hook").glob("*.py"), *(ROOT / "scripts").glob("*.py")]
+SOURCES = [
+    *(ROOT / "plugin" / "src").glob("*.ts"),
+    *(ROOT / "relay").glob("*.py"),
+    *(ROOT / "hook").glob("*.py"),
+    *(ROOT / "scripts").glob("*.py"),
+]
 
 
 class HardwareChecklist(unittest.TestCase):

@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Approval Gate admin commands. They work whether or not the relay is running.
 
-    python relay/gatectl.py pair --label pixel   # mint a device token for the plugin
-    python relay/gatectl.py devices              # list paired devices
-    python relay/gatectl.py revoke dev_1a2b3c    # unpair one
-    python relay/gatectl.py arm | disarm         # PC-side switch; the hotkey runs `disarm --source hotkey`
-    python relay/gatectl.py status               # armed state, relay URL, last log lines
-    python relay/gatectl.py log -n 3             # recent outcomes, one line each
+python relay/gatectl.py pair --label pixel   # mint a device token for the plugin
+python relay/gatectl.py devices              # list paired devices
+python relay/gatectl.py revoke dev_1a2b3c    # unpair one
+python relay/gatectl.py arm | disarm         # PC-side switch; the hotkey runs `disarm --source hotkey`
+python relay/gatectl.py status               # armed state, relay URL, last log lines
+python relay/gatectl.py log -n 3             # recent outcomes, one line each
 """
+
 from __future__ import annotations
 
 import argparse
@@ -32,12 +33,17 @@ def pair(home, args) -> None:
     link = f"{args.plugin_url.rstrip('/')}/?relay={quote(relay_url, safe='')}&token={token}"
     print(f"Paired {dev_id} ({args.label}). The token is shown once. Revoke with: gatectl.py revoke {dev_id}\n")
     print(f"  relay  {relay_url}\n  token  {token}\n")
-    print(f"Simulator:\n  npx evenhub-simulator \"{link}\"\n")
-    print(f"Phone (dev sideload; scan with the Even app):\n  npx evenhub qr --url \"{link}\"")
+    print(f'Simulator:\n  npx evenhub-simulator "{link}"\n')
+    print(f'Phone (dev sideload; scan with the Even app):\n  npx evenhub qr --url "{link}"')
 
 
-OUTCOMES = {"approved": "APPROVED", "denied": "DENIED", "bypassed": "TERMINAL", "timeout": "TIMEOUT",
-            "cancelled": "CANCELLED"}
+OUTCOMES = {
+    "approved": "APPROVED",
+    "denied": "DENIED",
+    "bypassed": "TERMINAL",
+    "timeout": "TIMEOUT",
+    "cancelled": "CANCELLED",
+}
 
 
 def show_log(home, count: int) -> None:

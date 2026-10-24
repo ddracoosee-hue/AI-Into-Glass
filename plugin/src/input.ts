@@ -32,24 +32,28 @@ export function createInput(screen: () => Screen, act: Actions, clock: Clock) {
     const s = screen()
     return s.kind === 'prompt' ? { id: s.id, shownAt: s.shownAt } : { id: s.kind, shownAt: -Infinity, immediate: true }
   }
-  return createGestures(view, {
-    tap(id) {
-      const s = screen()
-      if (s.kind === 'prompt' && s.id === id) act.approve(id)
-      else if (s.kind === 'off') act.arm()
-      else if (s.kind === 'offline') act.retry()
+  return createGestures(
+    view,
+    {
+      tap(id) {
+        const s = screen()
+        if (s.kind === 'prompt' && s.id === id) act.approve(id)
+        else if (s.kind === 'off') act.arm()
+        else if (s.kind === 'offline') act.retry()
+      },
+      double() {
+        const s = screen()
+        if (s.kind === 'prompt') act.deny()
+        else if (s.kind === 'armed') act.disarm()
+        else if (s.kind !== 'busy') act.exit()
+      },
+      swipe(down) {
+        if (screen().kind === 'prompt') act.swipe(down)
+      },
+      menu() {},
+      foreground: entered => act.foreground(entered),
+      systemExit: abnormal => act.systemExit(abnormal),
     },
-    double() {
-      const s = screen()
-      if (s.kind === 'prompt') act.deny()
-      else if (s.kind === 'armed') act.disarm()
-      else if (s.kind !== 'busy') act.exit()
-    },
-    swipe(down) {
-      if (screen().kind === 'prompt') act.swipe(down)
-    },
-    menu() {},
-    foreground: entered => act.foreground(entered),
-    systemExit: abnormal => act.systemExit(abnormal),
-  }, clock)
+    clock,
+  )
 }

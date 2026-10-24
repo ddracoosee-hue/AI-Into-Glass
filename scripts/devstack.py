@@ -13,6 +13,7 @@ State lives in C:/deck-sandbox/state (APPROVAL_GATE_HOME), never in %APPDATA%\\a
 your own paired devices, hook key and gate.log are untouched. The two projects, `glasses` and
 `hub`, are throwaway folders under C:/deck-sandbox with a TODO.md each.
 """
+
 from __future__ import annotations
 
 import json
@@ -57,19 +58,46 @@ def prepare() -> None:
         if not (folder / ".git").exists():
             subprocess.run(["git", "init", "-q", "-b", "main", str(folder)], check=True)
             (folder / "README.md").write_text(f"# {pid}\n")
-            subprocess.run(["git", "-C", str(folder), "-c", "user.email=demo@example.com", "-c", "user.name=Demo", "add", "-A"], check=True)
-            subprocess.run(["git", "-C", str(folder), "-c", "user.email=demo@example.com", "-c", "user.name=Demo", "commit", "-qm", f"Start {pid}"], check=True)
-    (PROJECTS["glasses"] / "TODO.md").write_text("# TODO\n\n- [ ] README threat model\n- [ ] record demo, rm -r build step\n- [x] ship v1\n")
+            subprocess.run(
+                ["git", "-C", str(folder), "-c", "user.email=demo@example.com", "-c", "user.name=Demo", "add", "-A"],
+                check=True,
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(folder),
+                    "-c",
+                    "user.email=demo@example.com",
+                    "-c",
+                    "user.name=Demo",
+                    "commit",
+                    "-qm",
+                    f"Start {pid}",
+                ],
+                check=True,
+            )
+    (PROJECTS["glasses"] / "TODO.md").write_text(
+        "# TODO\n\n- [ ] README threat model\n- [ ] record demo, rm -r build step\n- [x] ship v1\n"
+    )
     (PROJECTS["hub"] / "TODO.md").write_text("# TODO\n\n- [ ] wire Codex hooks\n")
-    config = {"projects": [{"id": pid, "name": "hub-orch" if pid == "hub" else pid, "root": folder.as_posix(), "todos": ["TODO.md"]}
-                           for pid, folder in PROJECTS.items()]}
+    config = {
+        "projects": [
+            {"id": pid, "name": "hub-orch" if pid == "hub" else pid, "root": folder.as_posix(), "todos": ["TODO.md"]}
+            for pid, folder in PROJECTS.items()
+        ]
+    }
     (STATE / "deck.projects.json").write_text(json.dumps(config, indent=2))
-    R.save_devices(STATE, {"dev_devstack": {"label": "devstack simulator", "sha256": R.sha256(token()), "created_at": R.now_iso()}})
+    R.save_devices(
+        STATE, {"dev_devstack": {"label": "devstack simulator", "sha256": R.sha256(token()), "created_at": R.now_iso()}}
+    )
 
 
 def spawn(name: str, args: list[str], cwd: Path, extra: dict | None = None) -> int:
     log = open(STATE / f"{name}.log", "w", encoding="utf-8")
-    proc = subprocess.Popen(args, cwd=cwd, env={**env(), **(extra or {})}, stdout=log, stderr=subprocess.STDOUT, creationflags=DETACHED)
+    proc = subprocess.Popen(
+        args, cwd=cwd, env={**env(), **(extra or {})}, stdout=log, stderr=subprocess.STDOUT, creationflags=DETACHED
+    )
     pids = json.loads(PIDS.read_text()) if PIDS.exists() else {}
     pids[name] = proc.pid
     PIDS.write_text(json.dumps(pids))
@@ -96,7 +124,10 @@ def kill(name: str, gentle: bool = False) -> None:
         if gentle:
             subprocess.run(["taskkill", "/PID", str(pid), "/T"], capture_output=True)
             for _ in range(30):
-                if str(pid) not in subprocess.run(["tasklist", "/FI", f"PID eq {pid}"], capture_output=True, text=True).stdout:
+                if (
+                    str(pid)
+                    not in subprocess.run(["tasklist", "/FI", f"PID eq {pid}"], capture_output=True, text=True).stdout
+                ):
                     break
                 time.sleep(0.2)
         subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
@@ -122,14 +153,23 @@ def up() -> None:
 def start_vite() -> None:
     kill("vite")
     # The dev build turns the phone page on; public builds leave it off.
-    spawn("vite", ["node", str(ROOT / "plugin" / "node_modules" / "vite" / "bin" / "vite.js")], ROOT / "plugin", {"VITE_DECK_PHONE": "1"})
+    spawn(
+        "vite",
+        ["node", str(ROOT / "plugin" / "node_modules" / "vite" / "bin" / "vite.js")],
+        ROOT / "plugin",
+        {"VITE_DECK_PHONE": "1"},
+    )
     if not wait_for("http://127.0.0.1:5180/"):
         sys.exit("vite did not start; see C:/deck-sandbox/state/vite.log")
 
 
 def start_relay() -> None:
     kill("relay")
-    spawn("relay", [sys.executable, str(ROOT / "relay" / "relay.py"), "--projects", str(STATE / "deck.projects.json")], ROOT)
+    spawn(
+        "relay",
+        [sys.executable, str(ROOT / "relay" / "relay.py"), "--projects", str(STATE / "deck.projects.json")],
+        ROOT,
+    )
     if not wait_for("http://127.0.0.1:8797/health"):
         sys.exit("relay did not start; see C:/deck-sandbox/state/relay.log")
 
@@ -147,8 +187,18 @@ def hooks() -> None:
     """The gate and Command Deck telemetry, in each project's own settings. Never global."""
     install = [sys.executable, str(ROOT / "scripts" / "install_hook.py"), "--deck"]
     for folder in PROJECTS.values():
-        subprocess.run([*install, "--settings", str(folder / ".claude" / "settings.json")], env=env(), check=True, capture_output=True)
-        subprocess.run([*install, "--codex", "--settings", str(folder / ".codex" / "hooks.json")], env=env(), check=True, capture_output=True)
+        subprocess.run(
+            [*install, "--settings", str(folder / ".claude" / "settings.json")],
+            env=env(),
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            [*install, "--codex", "--settings", str(folder / ".codex" / "hooks.json")],
+            env=env(),
+            check=True,
+            capture_output=True,
+        )
         exclude = folder / ".git" / "info" / "exclude"
         if ".claude/" not in exclude.read_text():
             exclude.write_text(exclude.read_text() + ".claude/\n.codex/\n")
@@ -163,21 +213,28 @@ def down() -> None:
 
 def post(agent: str, event: dict) -> None:
     key = (STATE / "ingest.key").read_text().strip()
-    req = urllib.request.Request(f"http://127.0.0.1:8798/ingest?agent={agent}", data=json.dumps(event).encode(), method="POST",
-                                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+    req = urllib.request.Request(
+        f"http://127.0.0.1:8798/ingest?agent={agent}",
+        data=json.dumps(event).encode(),
+        method="POST",
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+    )
     urllib.request.urlopen(req, timeout=5).read()
 
 
 def replay(agent: str, folder: str, session_suffix: str, stop_before: str | None, project: str) -> None:
     sys.path.insert(0, str(ROOT / "hook"))
     import deck_ingest
+
     for path in sorted((FIXTURES / agent).glob("*.json")):
-        text = path.read_text(encoding="utf-8").replace(json.dumps(REC)[1:-1], json.dumps(str(PROJECTS[project]).replace("/", "\\"))[1:-1])
+        text = path.read_text(encoding="utf-8").replace(
+            json.dumps(REC)[1:-1], json.dumps(str(PROJECTS[project]).replace("/", "\\"))[1:-1]
+        )
         text = text.replace(REC.replace("\\", "/"), PROJECTS[project].as_posix())
         event = json.loads(text)
         if stop_before and event["hook_event_name"] == stop_before:
             break
-        event["session_id"] = f"{event['session_id'][:-len(session_suffix)]}{session_suffix}"
+        event["session_id"] = f"{event['session_id'][: -len(session_suffix)]}{session_suffix}"
         post(agent, deck_ingest.slim(event, agent) if agent == "codex" else event)
 
 
@@ -186,7 +243,9 @@ def seed() -> None:
     hub (idle), Codex in hub (mid-run)."""
     replay("claude-code", "glasses", "0001", "PreToolUse", "glasses")  # just started
     events = sorted((FIXTURES / "claude-code").glob("*.json"))
-    push_at = next(i for i, p in enumerate(events) if "git push" in p.read_text(encoding="utf-8") and "PreToolUse" in p.name)
+    push_at = next(
+        i for i, p in enumerate(events) if "git push" in p.read_text(encoding="utf-8") and "PreToolUse" in p.name
+    )
     replay_until(events, push_at + 2, "glasses", "0002")
     replay("claude-code", "hub", "0003", "SessionEnd", "hub")
     replay("codex", "hub", "0004", "Stop", "hub")
@@ -195,9 +254,11 @@ def seed() -> None:
 
 def replay_until(paths: list[Path], count: int, project: str, suffix: str) -> None:
     for path in paths[:count]:
-        text = path.read_text(encoding="utf-8").replace(json.dumps(REC)[1:-1], json.dumps(str(PROJECTS[project]).replace("/", "\\"))[1:-1])
+        text = path.read_text(encoding="utf-8").replace(
+            json.dumps(REC)[1:-1], json.dumps(str(PROJECTS[project]).replace("/", "\\"))[1:-1]
+        )
         event = json.loads(text.replace(REC.replace("\\", "/"), PROJECTS[project].as_posix()))
-        event["session_id"] = f"{event['session_id'][:-len(suffix)]}{suffix}"
+        event["session_id"] = f"{event['session_id'][: -len(suffix)]}{suffix}"
         post("claude-code", event)
 
 

@@ -10,6 +10,7 @@ home directory (every spelling) for C:/Users/demo and drops prompt and assistant
 fixtures can be committed: they keep the real field names, ids, and path shapes.
 Stdlib only.
 """
+
 from __future__ import annotations
 
 import json
@@ -53,8 +54,10 @@ def scrub_value(value, pairs):
     if isinstance(value, list):
         return [scrub_value(v, pairs) for v in value]
     if isinstance(value, dict):
-        return {k: (f"<{k} omitted>" if k in TEXT_FIELDS and isinstance(v, str) and v else scrub_value(v, pairs))
-                for k, v in value.items()}
+        return {
+            k: (f"<{k} omitted>" if k in TEXT_FIELDS and isinstance(v, str) and v else scrub_value(v, pairs))
+            for k, v in value.items()
+        }
     return value
 
 
@@ -63,13 +66,17 @@ def scrub(src: Path, dst: Path, rebase: str | None = None) -> None:
     pairs = home_spellings(home, Path(home).name)
     if rebase:
         old, new = rebase.split("=", 1)
-        pairs = [(old, new), (old.replace("\\", "/"), new.replace("\\", "/")),
-                 (old.replace("\\", "\\\\"), new.replace("\\", "\\\\"))] + pairs
+        pairs = [
+            (old, new),
+            (old.replace("\\", "/"), new.replace("\\", "/")),
+            (old.replace("\\", "\\\\"), new.replace("\\", "\\\\")),
+        ] + pairs
     dst.mkdir(parents=True, exist_ok=True)
     for i, path in enumerate(sorted(src.glob("*.json"), key=lambda p: int(p.name.split("-")[0])), 1):
         event = scrub_value(json.loads(path.read_text(encoding="utf-8")), pairs)
         (dst / f"{i:03d}-{path.name.split('-', 1)[1]}").write_text(
-            json.dumps(event, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            json.dumps(event, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
     print(f"{i} fixtures -> {dst}")
 
 

@@ -18,8 +18,21 @@ const sleep = ms => new Promise(r => setTimeout(r, ms))
 async function launch(width, height) {
   const profile = join(tmpdir(), `deck-cdp-${PORT}`)
   mkdirSync(profile, { recursive: true })
-  const proc = spawn(CHROME, ['--headless=new', '--disable-gpu', '--hide-scrollbars', '--no-first-run', '--no-default-browser-check',
-    `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`, `--window-size=${width},${height}`, 'about:blank'], { stdio: 'ignore' })
+  const proc = spawn(
+    CHROME,
+    [
+      '--headless=new',
+      '--disable-gpu',
+      '--hide-scrollbars',
+      '--no-first-run',
+      '--no-default-browser-check',
+      `--remote-debugging-port=${PORT}`,
+      `--user-data-dir=${profile}`,
+      `--window-size=${width},${height}`,
+      'about:blank',
+    ],
+    { stdio: 'ignore' },
+  )
   for (let i = 0; i < 50; i++) {
     try {
       const targets = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json()
@@ -47,12 +60,16 @@ function session(url) {
       events.push(msg)
     }
   }
-  const ready = new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject })
-  const send = (method, params = {}) => new Promise((resolve, reject) => {
-    const n = ++id
-    waiting.set(n, { resolve, reject })
-    ws.send(JSON.stringify({ id: n, method, params }))
+  const ready = new Promise((resolve, reject) => {
+    ws.onopen = resolve
+    ws.onerror = reject
   })
+  const send = (method, params = {}) =>
+    new Promise((resolve, reject) => {
+      const n = ++id
+      waiting.set(n, { resolve, reject })
+      ws.send(JSON.stringify({ id: n, method, params }))
+    })
   return { ready, send, events, close: () => ws.close() }
 }
 
@@ -64,7 +81,13 @@ async function open(url, width = 1440, height = 1000) {
   await s.send('Runtime.enable')
   await s.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
   await s.send('Page.navigate', { url })
-  return { s, done: () => { s.close(); chrome.proc.kill() } }
+  return {
+    s,
+    done: () => {
+      s.close()
+      chrome.proc.kill()
+    },
+  }
 }
 
 async function evaluate(s, expression) {
@@ -81,8 +104,15 @@ try {
     await sleep(Number(wait))
     const { data } = await s.send('Page.captureScreenshot', { format: 'png' })
     writeFileSync(out, Buffer.from(data, 'base64'))
-    const errors = s.events.filter(e => e.method === 'Runtime.exceptionThrown' || (e.method === 'Runtime.consoleAPICalled' && e.params.type === 'error'))
-    const scroll = await evaluate(s, '[document.documentElement.scrollWidth > innerWidth, document.documentElement.scrollHeight > innerHeight]')
+    const errors = s.events.filter(
+      e =>
+        e.method === 'Runtime.exceptionThrown' ||
+        (e.method === 'Runtime.consoleAPICalled' && e.params.type === 'error'),
+    )
+    const scroll = await evaluate(
+      s,
+      '[document.documentElement.scrollWidth > innerWidth, document.documentElement.scrollHeight > innerHeight]',
+    )
     console.log(JSON.stringify({ out, errors: errors.length, scrollbars: scroll }))
     done()
   } else if (cmd === 'eval') {
@@ -108,7 +138,12 @@ try {
     const [outdir, w = '768', h = '540', scale = '1', seconds = '600', stopfile = ''] = rest
     mkdirSync(outdir, { recursive: true })
     const { s, done } = await open(url, Number(w), Number(h))
-    await s.send('Emulation.setDeviceMetricsOverride', { width: Number(w), height: Number(h), deviceScaleFactor: Number(scale), mobile: false })
+    await s.send('Emulation.setDeviceMetricsOverride', {
+      width: Number(w),
+      height: Number(h),
+      deviceScaleFactor: Number(scale),
+      mobile: false,
+    })
     await sleep(1500)
     let frames = 0
     const end = Date.now() + Number(seconds) * 1000
@@ -129,8 +164,10 @@ try {
     console.log(JSON.stringify({ outdir, frames }))
     done()
   } else {
-    console.error('usage: shot <url> <out.png> [w] [h] [waitMs] | eval <url> <expr> [waitMs] | sample <url> <expr> <out.jsonl> <seconds>'
-      + ' | record <url> <outdir> [w] [h] [scale] [seconds] [stopfile]')
+    console.error(
+      'usage: shot <url> <out.png> [w] [h] [waitMs] | eval <url> <expr> [waitMs] | sample <url> <expr> <out.jsonl> <seconds>' +
+        ' | record <url> <outdir> [w] [h] [scale] [seconds] [stopfile]',
+    )
     process.exit(2)
   }
 } catch (err) {

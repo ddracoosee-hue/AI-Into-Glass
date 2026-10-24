@@ -14,6 +14,7 @@ and deck_api.handle serves them to paired devices on this port.
     python relay/gatectl.py pair --label pixel   # mint a device token
     python relay/gatectl.py disarm               # PC-side kill switch
 """
+
 from __future__ import annotations
 
 import argparse
@@ -111,8 +112,14 @@ def save_devices(home: Path, devices: dict) -> None:
 
 
 class Relay:
-    def __init__(self, home: Path, expiry: dict[str, int] = EXPIRY, presence: float = PRESENCE,
-                 unwatched_disarm: float = UNWATCHED_DISARM, deck: Deck | None = None):
+    def __init__(
+        self,
+        home: Path,
+        expiry: dict[str, int] = EXPIRY,
+        presence: float = PRESENCE,
+        unwatched_disarm: float = UNWATCHED_DISARM,
+        deck: Deck | None = None,
+    ):
         self.home, self.expiry, self.presence, self.unwatched_disarm = home, expiry, presence, unwatched_disarm
         home.mkdir(parents=True, exist_ok=True)
         key_file = home / "hook.key"
@@ -127,7 +134,7 @@ class Relay:
         self.deck = deck
         self.cond = threading.Condition()
         self.requests: dict[str, dict] = {}  # id -> contract shape, insertion = age order
-        self.private: dict[str, dict] = {}   # id -> nonce, deadline, finished (never sent to the hook)
+        self.private: dict[str, dict] = {}  # id -> nonce, deadline, finished (never sent to the hook)
         self.last_session = ""
         self.last_poll = float("-inf")  # monotonic time a device last polled /pending
         self.started = time.monotonic()
@@ -150,8 +157,17 @@ class Relay:
         return None
 
     def log(self, event: str, req: dict) -> None:
-        append_log(self.home, event, id=req["id"], session=req["session"]["name"], tool=req["tool"],
-                   summary=req["summary"], risk=req["risk"], status=req["status"], decided_by=req["decided_by"])
+        append_log(
+            self.home,
+            event,
+            id=req["id"],
+            session=req["session"]["name"],
+            tool=req["tool"],
+            summary=req["summary"],
+            risk=req["risk"],
+            status=req["status"],
+            decided_by=req["decided_by"],
+        )
 
     def create(self, body: dict) -> dict | str:
         """Store a hook's request. Returns the stored request, or an error string."""
@@ -169,7 +185,13 @@ class Relay:
         if fields["risk"] not in self.expiry:
             return "risk must be low, medium or high"
         with self.cond:
-            refusal = "no device listening" if not self.watched else self.deck.gate_route(session, fields["tool"]) if self.deck else None
+            refusal = (
+                "no device listening"
+                if not self.watched
+                else self.deck.gate_route(session, fields["tool"])
+                if self.deck
+                else None
+            )
             if refusal:
                 if self.deck:
                     self.deck.gate_refused(body, refusal)
@@ -178,11 +200,23 @@ class Relay:
                 return "too many pending requests"
             ttl = self.expiry[fields["risk"]]
             created = datetime.now().astimezone()
-            req = {"id": f"req_{ulid()}", "created_at": created.isoformat(timespec="seconds"),
-                   "expires_at": (created + timedelta(seconds=ttl)).isoformat(timespec="seconds"),
-                   "session": session, **fields, "status": "pending", "decision": None, "decided_by": None, "decided_at": None}
+            req = {
+                "id": f"req_{ulid()}",
+                "created_at": created.isoformat(timespec="seconds"),
+                "expires_at": (created + timedelta(seconds=ttl)).isoformat(timespec="seconds"),
+                "session": session,
+                **fields,
+                "status": "pending",
+                "decision": None,
+                "decided_by": None,
+                "decided_at": None,
+            }
             self.requests[req["id"]] = req
-            self.private[req["id"]] = {"nonce": secrets.token_urlsafe(16), "deadline": time.monotonic() + ttl, "finished": 0.0}
+            self.private[req["id"]] = {
+                "nonce": secrets.token_urlsafe(16),
+                "deadline": time.monotonic() + ttl,
+                "finished": 0.0,
+            }
             self.last_session = session["name"]
             self.log("request", req)
             if self.deck:
@@ -218,8 +252,11 @@ class Relay:
         """Oldest live request plus its nonce, and how many are live."""
         with self.cond:
             now = self.last_poll = time.monotonic()
-            live = [r for r in self.requests.values()
-                    if r["status"] == "pending" and self.private[r["id"]]["deadline"] > now]
+            live = [
+                r
+                for r in self.requests.values()
+                if r["status"] == "pending" and self.private[r["id"]]["deadline"] > now
+            ]
             if not live or not self.armed:
                 return None, 0
             p = self.private[live[0]["id"]]
@@ -232,7 +269,9 @@ class Relay:
             req = self.requests.get(rid)
             if req is None:
                 return 404, {"error": "unknown request"}
-            if not (isinstance(nonce, str) and nonce.isascii() and hmac.compare_digest(nonce, self.private[rid]["nonce"])):
+            if not (
+                isinstance(nonce, str) and nonce.isascii() and hmac.compare_digest(nonce, self.private[rid]["nonce"])
+            ):
                 return 409, {"error": "nonce mismatch"}
             if req["status"] == "pending" and (time.monotonic() >= self.private[rid]["deadline"] or not self.armed):
                 self._finish(rid, "timeout" if self.armed else "cancelled")
@@ -252,6 +291,7 @@ class Relay:
         def run() -> None:
             while not self.stopping.wait(interval):
                 self.sweep()
+
         threading.Thread(target=run, daemon=True).start()
 
     def sweep(self) -> None:
@@ -322,7 +362,12 @@ class Handler(BaseHTTPRequestHandler):
         data = b"" if body is None else json.dumps(body, ensure_ascii=False).encode()
         try:
             self.send_response(code)
-            for k, v in {**CORS, "Access-Control-Allow-Origin": self.cors_origin, "Cache-Control": "no-store", **(headers or {})}.items():
+            for k, v in {
+                **CORS,
+                "Access-Control-Allow-Origin": self.cors_origin,
+                "Cache-Control": "no-store",
+                **(headers or {}),
+            }.items():
                 self.send_header(k, v)
             if code != 204:
                 self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -340,13 +385,18 @@ class Handler(BaseHTTPRequestHandler):
         path = url.path
         if path == "/health":
             who = "hook" if self.is_hook() else "device" if self.device() else None
-            return self.reply(200, {"ok": True, "version": VERSION, "armed": self.relay.armed, "auth": who, "contract": CONTRACT})
+            return self.reply(
+                200, {"ok": True, "version": VERSION, "armed": self.relay.armed, "auth": who, "contract": CONTRACT}
+            )
         if path == "/pending":
             if not self.device():
                 return self.reply(401, {"error": "unauthorized"})
             req, waiting = self.relay.pending()
-            headers = {"X-Gate-Armed": "1" if self.relay.armed else "0", "X-Gate-Waiting": str(waiting),
-                       "X-Gate-Session": quote(self.relay.last_session)}
+            headers = {
+                "X-Gate-Armed": "1" if self.relay.armed else "0",
+                "X-Gate-Waiting": str(waiting),
+                "X-Gate-Session": quote(self.relay.last_session),
+            }
             return self.reply(200, req, headers) if req else self.reply(204, None, headers)
         if m := WAIT_RE.fullmatch(path):
             if not self.is_hook():
@@ -416,10 +466,18 @@ class Server(ThreadingHTTPServer):
         super().server_bind()
 
 
-def make_server(home: Path, host: str = "127.0.0.1", port: int = 8797, cors_origin: str = "*",
-                expiry: dict[str, int] = EXPIRY, presence: float = PRESENCE,
-                unwatched_disarm: float = UNWATCHED_DISARM, projects: Path | None = None,
-                user_home: str | None = None, clock=time.time) -> tuple[Server, Relay]:
+def make_server(
+    home: Path,
+    host: str = "127.0.0.1",
+    port: int = 8797,
+    cors_origin: str = "*",
+    expiry: dict[str, int] = EXPIRY,
+    presence: float = PRESENCE,
+    unwatched_disarm: float = UNWATCHED_DISARM,
+    projects: Path | None = None,
+    user_home: str | None = None,
+    clock=time.time,
+) -> tuple[Server, Relay]:
     """The phone API. `projects` is deck.projects.json (default: the state dir's own)."""
     home.mkdir(parents=True, exist_ok=True)
     deck = Deck(home, Projects(projects or home / "deck.projects.json"), user_home, clock)
@@ -450,7 +508,9 @@ def serve(args) -> None:
     desktop = make_desktop_server(relay, args.desktop_port)
     url = f"http://{args.host}:{httpd.server_port}"
     ingest_url = f"http://127.0.0.1:{ingest.server_port}/ingest"
-    (home / "relay.json").write_text(json.dumps({"url": url, "ingest_url": ingest_url, "pid": os.getpid(), "version": VERSION}))
+    (home / "relay.json").write_text(
+        json.dumps({"url": url, "ingest_url": ingest_url, "pid": os.getpid(), "version": VERSION})
+    )
 
     relay.start_sweeper()
     for side in (ingest, desktop):
@@ -483,7 +543,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Approval Gate relay. Admin commands live in gatectl.py.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8797)
-    parser.add_argument("--cors-origin", default="*", help="Access-Control-Allow-Origin (auth is a bearer token, never a cookie)")
+    parser.add_argument(
+        "--cors-origin", default="*", help="Access-Control-Allow-Origin (auth is a bearer token, never a cookie)"
+    )
     parser.add_argument("--ingest-port", type=int, default=8798, help="Command Deck telemetry, 127.0.0.1 only")
     parser.add_argument("--desktop-port", type=int, default=8799, help="Command Deck desktop page, 127.0.0.1 only")
     parser.add_argument("--projects", help="deck.projects.json (default: the one in the state dir)")

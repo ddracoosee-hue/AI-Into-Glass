@@ -1,12 +1,32 @@
 """Demo cut tests: beat windows, output times, captions. Run: python -m unittest discover -s scripts"""
+
 import unittest
 
 import demo_run as R
 
 # Marks from the second clean rehearsal on Oct 22 (seconds into the take).
-MARKS = {"start": 0.0, "deck": 22.4, "b2": 28.8, "run-detail": 32.7, "b3": 45.9, "error-open": 50.1, "b4": 53.8, "sessions": 61.2,
-         "b5": 63.5, "focus-on": 68.1, "hub-asks": 77.9, "outside": 79.6, "push-prompt": 90.1, "push-restored": 92.7,
-         "rm-prompt": 103.8, "rm-reply": 107.2, "b8": 110.4, "todo-done": 117.6, "b9": 120.8, "summary": 125.0}
+MARKS = {
+    "start": 0.0,
+    "deck": 22.4,
+    "b2": 28.8,
+    "run-detail": 32.7,
+    "b3": 45.9,
+    "error-open": 50.1,
+    "b4": 53.8,
+    "sessions": 61.2,
+    "b5": 63.5,
+    "focus-on": 68.1,
+    "hub-asks": 77.9,
+    "outside": 79.6,
+    "push-prompt": 90.1,
+    "push-restored": 92.7,
+    "rm-prompt": 103.8,
+    "rm-reply": 107.2,
+    "b8": 110.4,
+    "todo-done": 117.6,
+    "b9": 120.8,
+    "summary": 125.0,
+}
 
 
 class Cut(unittest.TestCase):
@@ -16,7 +36,9 @@ class Cut(unittest.TestCase):
         total = plan[-1]["out_end"]
         self.assertLessEqual(total, 120)
         for b in plan:
-            self.assertGreaterEqual(b["out_end"] - b["out_start"], 2.5, b["key"])  # every caption stays up 2.5 s or more
+            self.assertGreaterEqual(
+                b["out_end"] - b["out_start"], 2.5, b["key"]
+            )  # every caption stays up 2.5 s or more
         for a, b in zip(plan, plan[1:]):
             self.assertEqual(a["out_end"], b["out_start"])
 
@@ -41,7 +63,9 @@ class Cut(unittest.TestCase):
     def test_captions_round_trip_through_srt(self):
         plan = R.plan(MARKS)
         srt = R.to_srt(plan)
-        self.assertTrue(srt.startswith("1\n00:00:00,000 --> 00:00:06,000\nThree AI agents. Two projects. One glance.\n"))
+        self.assertTrue(
+            srt.startswith("1\n00:00:00,000 --> 00:00:06,000\nThree AI agents. Two projects. One glance.\n")
+        )
         self.assertEqual(R.from_srt(srt), [b["caption"] for b in plan])
         edited = srt.replace("Two taps to say no.", "Two taps, and it's a no.")
         self.assertIn("Two taps, and it's a no.", R.from_srt(edited))

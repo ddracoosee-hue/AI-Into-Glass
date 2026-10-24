@@ -20,6 +20,7 @@ post telemetry, but it can't create or decide an approval.
 Codex loads a project's .codex/hooks.json only in a trusted project, and runs a hook only
 after you trust it: open `/hooks` in the Codex session and trust "Approval Gate".
 """
+
 from __future__ import annotations
 
 import argparse
@@ -33,11 +34,35 @@ from pathlib import Path
 HOOK = (Path(__file__).resolve().parent.parent / "hook" / "approval_gate_hook.py").as_posix()
 FORWARDER = (Path(__file__).resolve().parent.parent / "hook" / "deck_ingest.py").as_posix()
 PYTHON = Path(sys.executable).as_posix()
-CLAUDE_DECK_EVENTS = ("UserPromptSubmit", "PreToolUse", "PermissionRequest", "PermissionDenied", "PostToolUse",
-                      "PostToolUseFailure", "Notification", "SubagentStart", "SubagentStop", "TaskCreated",
-                      "TaskCompleted", "Stop", "StopFailure", "CwdChanged", "SessionEnd")
-CODEX_DECK_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse",
-                     "SubagentStart", "SubagentStop", "Stop", "SessionEnd", "Interrupt")
+CLAUDE_DECK_EVENTS = (
+    "UserPromptSubmit",
+    "PreToolUse",
+    "PermissionRequest",
+    "PermissionDenied",
+    "PostToolUse",
+    "PostToolUseFailure",
+    "Notification",
+    "SubagentStart",
+    "SubagentStop",
+    "TaskCreated",
+    "TaskCompleted",
+    "Stop",
+    "StopFailure",
+    "CwdChanged",
+    "SessionEnd",
+)
+CODEX_DECK_EVENTS = (
+    "SessionStart",
+    "UserPromptSubmit",
+    "PreToolUse",
+    "PermissionRequest",
+    "PostToolUse",
+    "SubagentStart",
+    "SubagentStop",
+    "Stop",
+    "SessionEnd",
+    "Interrupt",
+)
 TOKEN_VAR = "DECK_INGEST_TOKEN"
 
 
@@ -69,11 +94,27 @@ def deck_entries(codex: bool, port: int) -> dict[str, list[dict]]:
         command = f"{PYTHON} -I {FORWARDER} --agent codex"
         hook = {"type": "command", "command": command, "commandWindows": command, "async": True, "timeout": 2}
         return {event: [{"hooks": [dict(hook)]}] for event in CODEX_DECK_EVENTS}
-    http = {"type": "http", "url": f"http://127.0.0.1:{port}/ingest?agent=claude-code",
-            "headers": {"Authorization": f"Bearer ${TOKEN_VAR}"}, "allowedEnvVars": [TOKEN_VAR], "timeout": 2}
+    http = {
+        "type": "http",
+        "url": f"http://127.0.0.1:{port}/ingest?agent=claude-code",
+        "headers": {"Authorization": f"Bearer ${TOKEN_VAR}"},
+        "allowedEnvVars": [TOKEN_VAR],
+        "timeout": 2,
+    }
     entries = {event: [{"hooks": [dict(http)]}] for event in CLAUDE_DECK_EVENTS}
-    entries["SessionStart"] = [{"hooks": [{"type": "command", "command": PYTHON, "args": ["-I", FORWARDER, "--agent", "claude-code"],
-                                           "async": True, "timeout": 2}]}]
+    entries["SessionStart"] = [
+        {
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": PYTHON,
+                    "args": ["-I", FORWARDER, "--agent", "claude-code"],
+                    "async": True,
+                    "timeout": 2,
+                }
+            ]
+        }
+    ]
     return entries
 
 
@@ -86,7 +127,11 @@ def write(path: Path, settings: dict) -> None:
 
 def env_file(path: Path) -> Path:
     """Where the ingest token goes: never a project's committed settings.json."""
-    return path.with_name("settings.local.json") if path.name == "settings.json" and path.parent != Path.home() / ".claude" else path
+    return (
+        path.with_name("settings.local.json")
+        if path.name == "settings.json" and path.parent != Path.home() / ".claude"
+        else path
+    )
 
 
 def claude_entry(matcher: str) -> dict:
@@ -99,14 +144,30 @@ def codex_entry(matcher: str) -> dict:
     if " " in PYTHON or " " in HOOK:
         sys.exit(f"Paths with spaces need quoting this installer doesn't do: {PYTHON} {HOOK}")
     command = f"{PYTHON} -I {HOOK} --agent codex"
-    return {"matcher": matcher, "hooks": [{"type": "command", "command": command, "commandWindows": command,
-                                           "timeout": 100, "statusMessage": "Asking Approval Gate (glasses)"}]}
+    return {
+        "matcher": matcher,
+        "hooks": [
+            {
+                "type": "command",
+                "command": command,
+                "commandWindows": command,
+                "timeout": 100,
+                "statusMessage": "Asking Approval Gate (glasses)",
+            }
+        ],
+    }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--codex", action="store_true", help="write a Codex hooks.json entry instead of Claude Code settings")
-    parser.add_argument("--settings", type=Path, help="file to edit (default: ~/.claude/settings.json, or ~/.codex/hooks.json with --codex)")
+    parser.add_argument(
+        "--codex", action="store_true", help="write a Codex hooks.json entry instead of Claude Code settings"
+    )
+    parser.add_argument(
+        "--settings",
+        type=Path,
+        help="file to edit (default: ~/.claude/settings.json, or ~/.codex/hooks.json with --codex)",
+    )
     parser.add_argument("--matcher", help="tools to gate (default: Bash|Write|Edit, or Bash|apply_patch with --codex)")
     parser.add_argument("--deck", action="store_true", help="also register Command Deck telemetry")
     parser.add_argument("--ingest-port", type=int, default=8798)
@@ -119,7 +180,11 @@ def main() -> None:
     for event in list(hooks):
         hooks[event] = [g for g in hooks[event] if not is_gate(g) and not is_deck(g)]
     if not args.uninstall:
-        gate = codex_entry(args.matcher or "Bash|apply_patch") if args.codex else claude_entry(args.matcher or "Bash|Write|Edit")
+        gate = (
+            codex_entry(args.matcher or "Bash|apply_patch")
+            if args.codex
+            else claude_entry(args.matcher or "Bash|Write|Edit")
+        )
         hooks.setdefault("PermissionRequest", []).append(gate)
         if args.deck:
             for event, groups in deck_entries(args.codex, args.ingest_port).items():
@@ -131,7 +196,11 @@ def main() -> None:
 
     token_path = env_file(path)
     if not args.codex and (args.deck or args.uninstall):
-        local = settings if token_path == path else (json.loads(token_path.read_text(encoding="utf-8")) if token_path.exists() else {})
+        local = (
+            settings
+            if token_path == path
+            else (json.loads(token_path.read_text(encoding="utf-8")) if token_path.exists() else {})
+        )
         env = local.setdefault("env", {})
         env.pop(TOKEN_VAR, None)
         if args.deck and not args.uninstall:

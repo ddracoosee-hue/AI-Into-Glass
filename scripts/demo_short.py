@@ -10,6 +10,7 @@ simulator's own framebuffer and Chrome screencasts), with every screen held long
 Its raw take goes to C:/deck-sandbox/demo/take-short, so the full demo's take stays re-cuttable.
 Writes demo/command-deck-short.mp4.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -26,17 +27,19 @@ from demo_stage import git  # noqa: E402
 
 TAKE = DEMO / "take-short"
 FINAL = OUT / "command-deck-short.mp4"
-CAPTIONS = ["Three AI agents. Two projects. One glance.",
-            "What's running, where, for how long.",
-            "Prompts cut through any screen. One tap."]
-DECK_HOLD = 3.0     # on the Deck before the cursor moves
-CURSOR_HOLD = 1.0   # on the Running row before the tap
-ASK_AFTER = 1.2     # on Running before the hub session is asked: it can ask back in 2 s
-PROMPT_HOLD = 2.6   # the prompt, long enough to read, before the tap
-RUNNING_MAX = 3.4   # Running in the cut: past this, the wait for Claude to ask is cut out
-RUNNING_MIN = 2.5   # every caption stays up this long or more
-LEAD = 0.6          # Running again, just before the prompt, after that cut
-TAIL = 2.6          # back on Running after the approval, as long as the clip fits
+CAPTIONS = [
+    "Three AI agents. Two projects. One glance.",
+    "What's running, where, for how long.",
+    "Prompts cut through any screen. One tap.",
+]
+DECK_HOLD = 3.0  # on the Deck before the cursor moves
+CURSOR_HOLD = 1.0  # on the Running row before the tap
+ASK_AFTER = 1.2  # on Running before the hub session is asked: it can ask back in 2 s
+PROMPT_HOLD = 2.6  # the prompt, long enough to read, before the tap
+RUNNING_MAX = 3.4  # Running in the cut: past this, the wait for Claude to ask is cut out
+RUNNING_MIN = 2.5  # every caption stays up this long or more
+LEAD = 0.6  # Running again, just before the prompt, after that cut
+TAIL = 2.6  # back on Running after the approval, as long as the clip fits
 TAIL_MIN = 1.6
 LONGEST = 15.0
 
@@ -66,8 +69,12 @@ def stage_push() -> None:
 
 
 def pushed() -> bool:
-    head = lambda repo: subprocess.run(["git", "-C", str(repo), "rev-parse", "main"], capture_output=True, text=True).stdout.strip()
-    subject = subprocess.run(["git", "-C", str(HUB), "log", "-1", "--format=%s"], capture_output=True, text=True).stdout.strip()
+    head = lambda repo: subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "main"], capture_output=True, text=True
+    ).stdout.strip()
+    subject = subprocess.run(
+        ["git", "-C", str(HUB), "log", "-1", "--format=%s"], capture_output=True, text=True
+    ).stdout.strip()
     return subject == "Add the changelog" and head(DEMO / "demo-hub-origin.git") == head(HUB)
 
 
@@ -82,15 +89,30 @@ def drive() -> dict:
     capture = R.Capture(TAKE)
     mark("start")
     hub = R.Claude("hub", HUB, term, marks)
-    glasses = R.Claude("glasses", GLASSES, term, marks, allow=[f"{t}(python tools/render.py{x})" for t in ("Bash", "PowerShell") for x in ("", ":*")])
+    glasses = R.Claude(
+        "glasses",
+        GLASSES,
+        term,
+        marks,
+        allow=[f"{t}(python tools/render.py{x})" for t in ("Bash", "PowerShell") for x in ("", ":*")],
+    )
     hub.send("Reply with the single word: ready.")
-    glasses.send("Use the Bash tool to run python tools/render.py once. It takes about half a minute. Then reply with the single word: rendered.")
-    codex = R.Codex(HUB, "Run the test suite right away, before anything else: python -m unittest discover -s tests. "
-                         "Don't change any files and don't try to fix anything. Then reply with one short sentence.", term, marks)
+    glasses.send(
+        "Use the Bash tool to run python tools/render.py once. It takes about half a minute. Then reply with the single word: rendered."
+    )
+    codex = R.Codex(
+        HUB,
+        "Run the test suite right away, before anything else: python -m unittest discover -s tests. "
+        "Don't change any files and don't try to fix anything. Then reply with one short sentence.",
+        term,
+        marks,
+    )
     term.show("codex")
     try:
         # The Deck: three sessions, two running (the render and the suite), the hub session idle.
-        R.wait_for(lambda: R.counts() == (3, 2) and marks.get("hub-result-1"), 90, "3 sessions, 2 running, the hub idle", run)
+        R.wait_for(
+            lambda: R.counts() == (3, 2) and marks.get("hub-result-1"), 90, "3 sessions, 2 running, the hub idle", run
+        )
         mark("deck")
         time.sleep(DECK_HOLD)
         # One row down to Running, a beat on it, then in.
@@ -126,7 +148,11 @@ def drive() -> dict:
         server.shutdown()
         sim.gate("disarm")
     start = marks["start"]
-    late = [(round(a - start, 2), round(b - start, 2)) for a, b in capture.late if b > start and a < marks.get("end", time.time())]
+    late = [
+        (round(a - start, 2), round(b - start, 2))
+        for a, b in capture.late
+        if b > start and a < marks.get("end", time.time())
+    ]
     worst = max((b - a for a, b in late), default=0.0)
     checks = {
         "every step happened, no console errors": not run.failures,
@@ -142,7 +168,11 @@ def cut(take: dict) -> float:
     work = TAKE / "work"
     work.mkdir(exist_ok=True)
     end = t0 + int((marks["end"] + 1) * 1000)
-    for name, size, flags in (("glasses", "1152:576", "neighbor"), ("terminal", "768:540", "lanczos"), ("present", "768:540", "lanczos")):
+    for name, size, flags in (
+        ("glasses", "1152:576", "neighbor"),
+        ("terminal", "768:540", "lanczos"),
+        ("present", "768:540", "lanczos"),
+    ):
         R.frames_to_video(TAKE / name, t0, end, work / f"{name}.mp4", size, flags)
     parts = []
     for i, (s, e, c) in enumerate(pieces(marks)):
@@ -154,8 +184,31 @@ def cut(take: dict) -> float:
     listing = work / "pieces.txt"
     listing.write_text("\n".join(f"file '{p.as_posix()}'" for p in parts))
     total = round(sum(e - s for s, e, _ in pieces(marks)), 2)
-    R.ff("-f", "concat", "-safe", "0", "-i", str(listing), "-t", f"{total:.3f}", "-vf", f"fade=t=in:st=0:d=0.4,fade=t=out:st={total - 0.6:.3f}:d=0.6",
-         "-c:v", "libx264", "-preset", "slow", "-crf", "18", "-pix_fmt", "yuv420p", "-r", str(FPS), "-movflags", "+faststart", str(FINAL))
+    R.ff(
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        str(listing),
+        "-t",
+        f"{total:.3f}",
+        "-vf",
+        f"fade=t=in:st=0:d=0.4,fade=t=out:st={total - 0.6:.3f}:d=0.6",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "slow",
+        "-crf",
+        "18",
+        "-pix_fmt",
+        "yuv420p",
+        "-r",
+        str(FPS),
+        "-movflags",
+        "+faststart",
+        str(FINAL),
+    )
     print(f"Cut {FINAL} ({total:.1f} s)")
     at = 0.0
     for s, e, c in pieces(marks):
@@ -166,7 +219,9 @@ def cut(take: dict) -> float:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Record and cut the short Command Deck demo.")
-    parser.add_argument("--cut", action="store_true", help="re-cut the last short take (C:/deck-sandbox/demo/take-short)")
+    parser.add_argument(
+        "--cut", action="store_true", help="re-cut the last short take (C:/deck-sandbox/demo/take-short)"
+    )
     args = parser.parse_args()
     if args.cut:
         cut(json.loads((TAKE / "take.json").read_text()))

@@ -17,6 +17,7 @@ Before `record`: relay running, plugin dev server running, simulator open with
 `--automation-port 9898` and paired, ffmpeg on PATH (`winget install Gyan.FFmpeg.Essentials`).
 Don't touch the keyboard or mouse during the take: the script types into the terminal.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -39,12 +40,14 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "demo-take"
 MARKER = ".approval-gate-demo"
 TITLE = "hub-orchestrator"
-PROMPT = ("Release chore for this repo. Do exactly these three steps, one tool call each, in this order, "
-          "with no other tool calls. Step 1, Bash: git push origin main. "
-          "Step 2, Write: a file named .env containing the single line DEMO_MODE=1. "
-          "Step 3, Bash: rm -r build. "
-          "If a step is denied or rejected, do not retry it, just go on to the next step. "
-          "When all three are done, reply with one short sentence.")
+PROMPT = (
+    "Release chore for this repo. Do exactly these three steps, one tool call each, in this order, "
+    "with no other tool calls. Step 1, Bash: git push origin main. "
+    "Step 2, Write: a file named .env containing the single line DEMO_MODE=1. "
+    "Step 3, Bash: rm -r build. "
+    "If a step is denied or rejected, do not retry it, just go on to the next step. "
+    "When all three are done, reply with one short sentence."
+)
 FOLLOW_UP = "Skip that step and go on."
 LOG_COMMAND = f"!python {(ROOT / 'relay' / 'gatectl.py').as_posix()} log -n 3"
 
@@ -61,19 +64,22 @@ BEATS = [
     ("log", 5, "Logged, open-source, built on Even Hub.", "log", 0.5),
 ]
 # When the driver acts, relative to its marks. Chosen so each beat's window contains its action.
-PROMPT_HOLD = 7     # swipe down this long after the request reaches the relay
-DETAIL_HOLD = 5     # tap this long after the swipe
-DIALOG_HOLD = 9     # answer the terminal's own .env dialog (Esc) this long after it appears
-DENY_AFTER = 4      # double-tap this long after the rm request reaches the relay
-FINISH_WAIT = 10    # let Claude report the deny before typing the log command
+PROMPT_HOLD = 7  # swipe down this long after the request reaches the relay
+DETAIL_HOLD = 5  # tap this long after the swipe
+DIALOG_HOLD = 9  # answer the terminal's own .env dialog (Esc) this long after it appears
+DENY_AFTER = 4  # double-tap this long after the rm request reaches the relay
+FINISH_WAIT = 10  # let Claude report the deny before typing the log command
 LOG_HOLD = 6
 CAPTURE_LATENCY = 0.25  # gdigrab's first frame lands roughly this long after launch
 EXAMPLE_MARKS = {"push": 12.0, "swipe": 19.0, "tap": 24.0, "env": 48.0, "rm": 70.0, "log": 95.0}
-CAPTION_STYLE = ("FontName=Segoe UI,FontSize=26,PrimaryColour=&H00FFFFFF,OutlineColour=&H99000000,"
-                 "BorderStyle=3,Outline=8,Shadow=0,Alignment=2,MarginV=36")
+CAPTION_STYLE = (
+    "FontName=Segoe UI,FontSize=26,PrimaryColour=&H00FFFFFF,OutlineColour=&H99000000,"
+    "BorderStyle=3,Outline=8,Shadow=0,Alignment=2,MarginV=36"
+)
 
 
 # ---- the cut ----------------------------------------------------------------------
+
 
 def plan_cut(marks: dict[str, float]) -> list[dict]:
     """Beat sheet + marks -> source window and output time for every beat."""
@@ -82,8 +88,14 @@ def plan_cut(marks: dict[str, float]) -> list[dict]:
         start = marks[anchor] + offset
         end = start + seconds
         start = max(0.0, start)  # a fast start can leave less than 8 s of lead-in
-        cut.append({"beat": key, "caption": caption, "src": (round(start, 3), round(end, 3)),
-                    "out": (round(out, 3), round(out + end - start, 3))})
+        cut.append(
+            {
+                "beat": key,
+                "caption": caption,
+                "src": (round(start, 3), round(end, 3)),
+                "out": (round(out, 3), round(out + end - start, 3)),
+            }
+        )
         out += end - start
     return cut
 
@@ -104,17 +116,46 @@ def srt(cut: list[dict]) -> str:
     def ts(t: float) -> str:
         ms = round(t * 1000)
         return f"{ms // 3_600_000:02}:{ms // 60_000 % 60:02}:{ms // 1000 % 60:02},{ms % 1000:03}"
+
     return "\n".join(f"{i}\n{ts(b['out'][0])} --> {ts(b['out'][1])}\n{b['caption']}\n" for i, b in enumerate(cut, 1))
 
 
-def cut_command(ffmpeg: str, cut: list[dict], raw: str = "raw.mp4", captions: str = "captions.srt",
-                out: str = "approval-gate-demo.mp4") -> list[str]:
+def cut_command(
+    ffmpeg: str,
+    cut: list[dict],
+    raw: str = "raw.mp4",
+    captions: str = "captions.srt",
+    out: str = "approval-gate-demo.mp4",
+) -> list[str]:
     """ffmpeg argv, to run with cwd = the take folder (keeps the subtitles path free of escaping)."""
     parts = [f"[0:v]trim=start={s:.3f}:end={e:.3f},setpts=PTS-STARTPTS[s{i}]" for i, (s, e) in enumerate(segments(cut))]
     labels = "".join(f"[s{i}]" for i in range(len(parts)))
-    graph = ";".join(parts) + f";{labels}concat=n={len(parts)}:v=1:a=0[cat];[cat]scale=1920:-2:flags=lanczos,subtitles={captions}:force_style='{CAPTION_STYLE}'[v]"
-    return [ffmpeg, "-hide_banner", "-y", "-i", raw, "-filter_complex", graph, "-map", "[v]",
-            "-c:v", "libx264", "-preset", "slow", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart", out]
+    graph = (
+        ";".join(parts)
+        + f";{labels}concat=n={len(parts)}:v=1:a=0[cat];[cat]scale=1920:-2:flags=lanczos,subtitles={captions}:force_style='{CAPTION_STYLE}'[v]"
+    )
+    return [
+        ffmpeg,
+        "-hide_banner",
+        "-y",
+        "-i",
+        raw,
+        "-filter_complex",
+        graph,
+        "-map",
+        "[v]",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "slow",
+        "-crf",
+        "18",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        out,
+    ]
 
 
 def print_plan(cut: list[dict]) -> None:
@@ -124,11 +165,14 @@ def print_plan(cut: list[dict]) -> None:
         print(f"{o1:5.1f}–{o2:5.1f}  {s1:7.1f}–{s2:7.1f}  {b['beat']:<9} {b['caption']}")
     overlaps = [(a["beat"], b["beat"]) for a, b in zip(cut, cut[1:]) if b["src"][0] < a["src"][1] - 0.05]
     total = cut[-1]["out"][1]
-    print(f"\n{len(segments(cut))} source segments, {total:.1f} s total"
-          + (f". Overlapping footage: {overlaps}" if overlaps else ""))
+    print(
+        f"\n{len(segments(cut))} source segments, {total:.1f} s total"
+        + (f". Overlapping footage: {overlaps}" if overlaps else "")
+    )
 
 
 # ---- the demo repo -------------------------------------------------------------------
+
 
 def git(repo: Path, *args: str) -> None:
     subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
@@ -138,6 +182,7 @@ def remove_tree(path: Path) -> None:
     def make_writable(func, p, _exc):  # git marks object files read-only
         os.chmod(p, stat.S_IWRITE)
         func(p)
+
     shutil.rmtree(path, onexc=make_writable)
 
 
@@ -169,25 +214,46 @@ def prepare(repo: Path) -> None:
     git(repo, "commit", "-q", "-am", "Release 1.4.2")
     (repo / "build").mkdir()
     (repo / "build" / "hub-1.4.2.whl").write_text("demo artifact\n")
-    subprocess.run([sys.executable, str(ROOT / "scripts" / "install_hook.py"),
-                    "--settings", str(repo / ".claude" / "settings.local.json")], check=True, capture_output=True)
+    subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "install_hook.py"),
+            "--settings",
+            str(repo / ".claude" / "settings.local.json"),
+        ],
+        check=True,
+        capture_output=True,
+    )
 
 
 # ---- windows, keys and the screen ---------------------------------------------------
 
+
 class INPUT_KEY(ctypes.Structure):
-    _fields_ = [("wVk", wintypes.WORD), ("wScan", wintypes.WORD), ("dwFlags", wintypes.DWORD),
-                ("time", wintypes.DWORD), ("dwExtraInfo", ctypes.c_size_t)]
+    _fields_ = [
+        ("wVk", wintypes.WORD),
+        ("wScan", wintypes.WORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.c_size_t),
+    ]
 
 
 class INPUT_MOUSE(ctypes.Structure):  # only here so the union has the size SendInput expects
-    _fields_ = [("dx", wintypes.LONG), ("dy", wintypes.LONG), ("mouseData", wintypes.DWORD),
-                ("dwFlags", wintypes.DWORD), ("time", wintypes.DWORD), ("dwExtraInfo", ctypes.c_size_t)]
+    _fields_ = [
+        ("dx", wintypes.LONG),
+        ("dy", wintypes.LONG),
+        ("mouseData", wintypes.DWORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.c_size_t),
+    ]
 
 
 class INPUT(ctypes.Structure):
     class _U(ctypes.Union):
         _fields_ = [("ki", INPUT_KEY), ("mi", INPUT_MOUSE)]
+
     _fields_ = [("type", wintypes.DWORD), ("u", _U)]
 
 
@@ -227,7 +293,11 @@ class Desktop:
             return ""
         try:
             size, name = wintypes.DWORD(1024), ctypes.create_unicode_buffer(1024)
-            return Path(name.value).name.lower() if self.kernel32.QueryFullProcessImageNameW(handle, 0, name, ctypes.byref(size)) else ""
+            return (
+                Path(name.value).name.lower()
+                if self.kernel32.QueryFullProcessImageNameW(handle, 0, name, ctypes.byref(size))
+                else ""
+            )
         finally:
             self.kernel32.CloseHandle(handle)
 
@@ -280,6 +350,7 @@ def primary_region() -> tuple[int, int, int, int]:
 
 
 # ---- the take --------------------------------------------------------------------------
+
 
 def state_dir() -> Path:
     if os.environ.get("APPROVAL_GATE_HOME"):
@@ -343,8 +414,11 @@ def check(args) -> bool:
     else:
         report(args.no_capture, "ffmpeg", fix="winget install Gyan.FFmpeg.Essentials")
     dpi = ctypes.windll.user32.GetDpiForSystem()
-    report(dpi == 96, "display scaling 100%",
-           fix=f"{dpi * 100 // 96}%: gdigrab may capture a shifted region. Set 100% for the take, or check a test clip")
+    report(
+        dpi == 96,
+        "display scaling 100%",
+        fix=f"{dpi * 100 // 96}%: gdigrab may capture a shifted region. Set 100% for the take, or check a test clip",
+    )
     width, height = ctypes.windll.user32.GetSystemMetrics(0), ctypes.windll.user32.GetSystemMetrics(1)
     print(f"  capture region {args.region} of a {width}x{height} screen: terminal left half, simulator right half")
     return ok
@@ -367,18 +441,60 @@ def record(args) -> None:
     take = OUT / "take.cmd"  # cmd keeps the prompt's quoting intact through wt
     take.write_text(f'@echo off\nclaude --permission-mode default "{PROMPT}"\n')  # text mode writes CRLF
     tail = LogTail(state_dir() / "gate.log")
-    subprocess.Popen(["wt", "-w", "new", "new-tab", "--title", TITLE, "--suppressApplicationTitle",
-                      "-d", str(args.repo), "cmd", "/c", str(take)])
+    subprocess.Popen(
+        [
+            "wt",
+            "-w",
+            "new",
+            "new-tab",
+            "--title",
+            TITLE,
+            "--suppressApplicationTitle",
+            "-d",
+            str(args.repo),
+            "cmd",
+            "/c",
+            str(take),
+        ]
+    )
     terminal = desk.find("windowsterminal.exe", TITLE)
     desk.place(terminal, x, y, w // 2, h)
 
     capture = None
     if not args.no_capture:
-        capture = subprocess.Popen([shutil.which("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y",
-                                    "-f", "gdigrab", "-framerate", "30", "-draw_mouse", "0",
-                                    "-offset_x", str(x), "-offset_y", str(y), "-video_size", f"{w}x{h}", "-i", "desktop",
-                                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
-                                    str(OUT / "raw.mp4")], stdin=subprocess.PIPE)
+        capture = subprocess.Popen(
+            [
+                shutil.which("ffmpeg"),
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "gdigrab",
+                "-framerate",
+                "30",
+                "-draw_mouse",
+                "0",
+                "-offset_x",
+                str(x),
+                "-offset_y",
+                str(y),
+                "-video_size",
+                f"{w}x{h}",
+                "-i",
+                "desktop",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "18",
+                "-pix_fmt",
+                "yuv420p",
+                str(OUT / "raw.mp4"),
+            ],
+            stdin=subprocess.PIPE,
+        )
     t0 = time.monotonic() + (CAPTURE_LATENCY if capture else 0)
     marks: dict[str, float] = {}
 
@@ -417,8 +533,17 @@ def record(args) -> None:
     finally:
         if capture:
             capture.communicate(b"q", timeout=30)  # ffmpeg finalizes the file on q
-        (OUT / "beats.json").write_text(json.dumps({"recorded_at": datetime.now().astimezone().isoformat(),
-                                                    "region": args.region, "marks": marks, "prompt": PROMPT}, indent=2))
+        (OUT / "beats.json").write_text(
+            json.dumps(
+                {
+                    "recorded_at": datetime.now().astimezone().isoformat(),
+                    "region": args.region,
+                    "marks": marks,
+                    "prompt": PROMPT,
+                },
+                indent=2,
+            )
+        )
     print_plan(plan_cut(marks))
     print(f"\nRaw take: {OUT / 'raw.mp4'}. Next: python scripts/demo.py cut")
 
@@ -436,10 +561,18 @@ def cut(args) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("command", choices=("prepare", "check", "record", "plan", "cut"))
-    parser.add_argument("--repo", type=Path, default=Path(ROOT.anchor) / "demo" / TITLE,
-                        help="demo repo, recreated on every take (default: <drive>/demo/hub-orchestrator)")
-    parser.add_argument("--region", type=lambda s: tuple(int(v) for v in s.split(",")), default=None,
-                        help="capture region x,y,w,h in physical pixels (default: top-left of the primary screen, at most 2560x1440)")
+    parser.add_argument(
+        "--repo",
+        type=Path,
+        default=Path(ROOT.anchor) / "demo" / TITLE,
+        help="demo repo, recreated on every take (default: <drive>/demo/hub-orchestrator)",
+    )
+    parser.add_argument(
+        "--region",
+        type=lambda s: tuple(int(v) for v in s.split(",")),
+        default=None,
+        help="capture region x,y,w,h in physical pixels (default: top-left of the primary screen, at most 2560x1440)",
+    )
     parser.add_argument("--no-capture", action="store_true", help="drive the take without recording")
     parser.add_argument("--example", action="store_true", help="plan: use nominal timings instead of beats.json")
     args = parser.parse_args()

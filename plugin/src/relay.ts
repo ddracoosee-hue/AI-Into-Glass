@@ -27,20 +27,33 @@ const ID_RE = /^req_[0-9A-Z]{26}$/
 function isPending(value: unknown): value is PendingRequest {
   const r = value as PendingRequest
   return (
-    typeof r === 'object' && r !== null &&
-    typeof r.id === 'string' && ID_RE.test(r.id) &&
-    typeof r.summary === 'string' && typeof r.detail === 'string' && typeof r.tool === 'string' &&
-    typeof r.nonce === 'string' && typeof r.expires_in === 'number' &&
+    typeof r === 'object' &&
+    r !== null &&
+    typeof r.id === 'string' &&
+    ID_RE.test(r.id) &&
+    typeof r.summary === 'string' &&
+    typeof r.detail === 'string' &&
+    typeof r.tool === 'string' &&
+    typeof r.nonce === 'string' &&
+    typeof r.expires_in === 'number' &&
     ['low', 'medium', 'high'].includes(r.risk) &&
     typeof r.session?.name === 'string'
   )
 }
 
 export class RelayClient {
-  constructor(readonly base: string, private readonly token: string) {}
+  constructor(
+    readonly base: string,
+    private readonly token: string,
+  ) {}
 
-  protected async call(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: object, keepalive = false,
-    timeoutMs = TIMEOUT_MS): Promise<Response> {
+  protected async call(
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+    path: string,
+    body?: object,
+    keepalive = false,
+    timeoutMs = TIMEOUT_MS,
+  ): Promise<Response> {
     const abort = new AbortController()
     const timer = setTimeout(() => abort.abort(), timeoutMs)
     try {

@@ -1,4 +1,5 @@
 """Relay tests. Run: python -m unittest discover -s relay"""
+
 import json
 import socket
 import tempfile
@@ -15,8 +16,13 @@ DEVICE_TOKEN = "agt_test-device-token"
 
 
 def request_body(**over):
-    body = {"session": {"agent": "claude-code", "name": "hub", "cwd": "~/dev/hub"},
-            "tool": "Bash", "summary": "git push origin main", "detail": "git push origin main --tags", "risk": "high"}
+    body = {
+        "session": {"agent": "claude-code", "name": "hub", "cwd": "~/dev/hub"},
+        "tool": "Bash",
+        "summary": "git push origin main",
+        "detail": "git push origin main --tags",
+        "risk": "high",
+    }
     body.update(over)
     return body
 
@@ -29,9 +35,12 @@ class RelayTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name)
-        R.save_devices(self.home, {"dev_abc123": {"label": "test", "sha256": R.sha256(DEVICE_TOKEN), "created_at": R.now_iso()}})
-        self.httpd, self.relay = R.make_server(self.home, port=0, expiry=self.expiry, presence=self.presence,
-                                               unwatched_disarm=self.unwatched_disarm)
+        R.save_devices(
+            self.home, {"dev_abc123": {"label": "test", "sha256": R.sha256(DEVICE_TOKEN), "created_at": R.now_iso()}}
+        )
+        self.httpd, self.relay = R.make_server(
+            self.home, port=0, expiry=self.expiry, presence=self.presence, unwatched_disarm=self.unwatched_disarm
+        )
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         self.base = f"http://127.0.0.1:{self.httpd.server_port}"
         self.hook_key = self.relay.hook_key
@@ -84,12 +93,15 @@ class RoundTrip(RelayTest):
         self.assertEqual(headers["X-Gate-Session"], "hub")
         self.assertLessEqual(pending["expires_in"], 45)  # high risk
         t, result = self.wait_async(rid)
-        status, decided, _ = self.call("POST", f"/requests/{rid}/decide", DEVICE_TOKEN,
-                                       {"decision": "approve", "nonce": pending["nonce"]})
+        status, decided, _ = self.call(
+            "POST", f"/requests/{rid}/decide", DEVICE_TOKEN, {"decision": "approve", "nonce": pending["nonce"]}
+        )
         self.assertEqual(status, 200)
         t.join(5)
         status, final, _ = result["r"]
-        self.assertEqual((final["status"], final["decision"], final["decided_by"]), ("approved", "approve", "dev_abc123"))
+        self.assertEqual(
+            (final["status"], final["decision"], final["decided_by"]), ("approved", "approve", "dev_abc123")
+        )
         self.assertNotIn("nonce", final)
         self.assertEqual(self.call("GET", "/pending", DEVICE_TOKEN)[0], 204)
         log = (self.home / "gate.log").read_text(encoding="utf-8")
@@ -118,21 +130,30 @@ class OneDecision(RelayTest):
     def test_wrong_nonce_and_replay(self):
         rid = self.create()
         _, pending, _ = self.call("GET", "/pending", DEVICE_TOKEN)
-        self.assertEqual(self.call("POST", f"/requests/{rid}/decide", DEVICE_TOKEN, {"decision": "approve", "nonce": "guess"})[0], 409)
+        self.assertEqual(
+            self.call("POST", f"/requests/{rid}/decide", DEVICE_TOKEN, {"decision": "approve", "nonce": "guess"})[0],
+            409,
+        )
         good = {"decision": "approve", "nonce": pending["nonce"]}
         self.assertEqual(self.call("POST", f"/requests/{rid}/decide", DEVICE_TOKEN, good)[0], 200)
-        status, body, _ = self.call("POST", f"/requests/{rid}/decide", DEVICE_TOKEN, {"decision": "deny", "nonce": pending["nonce"]})
+        status, body, _ = self.call(
+            "POST", f"/requests/{rid}/decide", DEVICE_TOKEN, {"decision": "deny", "nonce": pending["nonce"]}
+        )
         self.assertEqual((status, body["status"]), (409, "approved"))
 
     def test_only_approve_or_deny(self):
         rid = self.create()
         _, pending, _ = self.call("GET", "/pending", DEVICE_TOKEN)
         for decision in ("allow", "APPROVE", None, 1):
-            status, _, _ = self.call("POST", f"/requests/{rid}/decide", DEVICE_TOKEN, {"decision": decision, "nonce": pending["nonce"]})
+            status, _, _ = self.call(
+                "POST", f"/requests/{rid}/decide", DEVICE_TOKEN, {"decision": decision, "nonce": pending["nonce"]}
+            )
             self.assertEqual(status, 400, decision)
 
     def test_unknown_id(self):
-        status, _, _ = self.call("POST", f"/requests/req_{R.ulid()}/decide", DEVICE_TOKEN, {"decision": "approve", "nonce": "x"})
+        status, _, _ = self.call(
+            "POST", f"/requests/req_{R.ulid()}/decide", DEVICE_TOKEN, {"decision": "approve", "nonce": "x"}
+        )
         self.assertEqual(status, 404)
         self.assertEqual(self.call("GET", f"/requests/req_{R.ulid()}/wait", self.hook_key)[0], 404)
 
@@ -145,7 +166,9 @@ class Expiry(RelayTest):
         _, pending, _ = self.call("GET", "/pending", DEVICE_TOKEN)
         status, final, _ = self.call("GET", f"/requests/{rid}/wait", self.hook_key)
         self.assertEqual((final["status"], final["decision"]), ("timeout", None))
-        status, body, _ = self.call("POST", f"/requests/{rid}/decide", DEVICE_TOKEN, {"decision": "approve", "nonce": pending["nonce"]})
+        status, body, _ = self.call(
+            "POST", f"/requests/{rid}/decide", DEVICE_TOKEN, {"decision": "approve", "nonce": pending["nonce"]}
+        )
         self.assertEqual((status, body["status"]), (409, "timeout"))
         self.assertEqual(self.call("GET", "/pending", DEVICE_TOKEN)[0], 204)
 
@@ -174,8 +197,16 @@ class Arming(RelayTest):
         R.set_armed(self.home, False, "hotkey")
         R.set_armed(self.home, True, "cli")
         switches = [(e["event"], e["source"], e["by"]) for e in self.log_events() if e["event"] in ("arm", "disarm")]
-        self.assertEqual(switches, [("arm", "cli", None), ("disarm", "phone", "dev_abc123"), ("arm", "glasses", "dev_abc123"),
-                                    ("disarm", "hotkey", None), ("arm", "cli", None)])
+        self.assertEqual(
+            switches,
+            [
+                ("arm", "cli", None),
+                ("disarm", "phone", "dev_abc123"),
+                ("arm", "glasses", "dev_abc123"),
+                ("disarm", "hotkey", None),
+                ("arm", "cli", None),
+            ],
+        )
 
     def test_a_device_must_say_where_the_switch_came_from(self):
         for body in ({}, {"source": "hotkey"}, {"source": "relay"}, {"source": None}):
@@ -216,6 +247,7 @@ class Presence(RelayTest):
 
 class UnwatchedDisarm(RelayTest):
     """The plugin went away without disarming: crashed, WebView killed, phone died."""
+
     presence = 0.3
     unwatched_disarm = 1
 
@@ -224,7 +256,9 @@ class UnwatchedDisarm(RelayTest):
         self.relay.sweep()
         self.assertFalse((self.home / "armed").exists())
         last = self.log_events()[-1]
-        self.assertEqual((last["event"], last["source"], last["reason"]), ("disarm", "relay", "no device polled for 1 s"))
+        self.assertEqual(
+            (last["event"], last["source"], last["reason"]), ("disarm", "relay", "no device polled for 1 s")
+        )
 
     def test_a_fresh_arm_gets_the_full_window_before_the_backstop(self):
         time.sleep(1.2)
@@ -251,7 +285,9 @@ class Auth(RelayTest):
         self.assertEqual(self.call("POST", "/requests", DEVICE_TOKEN, request_body())[0], 401)
         rid = self.create()
         self.assertEqual(self.call("GET", f"/requests/{rid}/wait", DEVICE_TOKEN)[0], 401)
-        self.assertEqual(self.call("POST", f"/requests/{rid}/decide", self.hook_key, {"decision": "approve", "nonce": "x"})[0], 401)
+        self.assertEqual(
+            self.call("POST", f"/requests/{rid}/decide", self.hook_key, {"decision": "approve", "nonce": "x"})[0], 401
+        )
         self.assertEqual(self.call("POST", "/arm", self.hook_key, {"source": "glasses"})[0], 401)
 
     def test_revoked_device(self):
@@ -267,8 +303,14 @@ class Auth(RelayTest):
 
 class Validation(RelayTest):
     def test_rejects_bad_requests(self):
-        cases = [request_body(summary="x" * 61), request_body(summary=""), request_body(risk="extreme"),
-                 request_body(detail="x" * 201), request_body(tool=7), {"tool": "Bash"}]
+        cases = [
+            request_body(summary="x" * 61),
+            request_body(summary=""),
+            request_body(risk="extreme"),
+            request_body(detail="x" * 201),
+            request_body(tool=7),
+            {"tool": "Bash"},
+        ]
         for body in cases:
             self.assertEqual(self.call("POST", "/requests", self.hook_key, body)[0], 400, body)
         self.assertEqual(self.call("POST", "/requests", self.hook_key, raw=b"{not json")[0], 400)

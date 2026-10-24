@@ -1,0 +1,17 @@
+# Tooling only: the relay, hooks and scripts are stdlib-only and run directly with `python`.
+# Nothing here is installed; see README "Development".
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["plugin/node_modules", "tests/fixtures"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.ruff.lint.isort]
+# The relay, hook and script modules import their siblings by bare name.
+known-first-party = ["deck", "deck_api", "projects", "relay", "gatectl", "approval_gate_hook", "deck_ingest", "sim", "demo", "demo_run", "demo_stage", "devstack", "install_hook", "record_hooks", "cdp"]
+
+[tool.ruff.format]
+quote-style = "double"

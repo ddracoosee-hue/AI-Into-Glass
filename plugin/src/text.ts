@@ -39,7 +39,11 @@ function pad(from: number, to: number, before = false): string {
  * One line of columns, no wider than `limit`. Each column starts at its `x`, and text that would
  * run into the next column (or past the limit) is cut with …. `right` is right-aligned to its edge.
  */
-export function columns(cols: { text: string; x: number }[], limit: number, right?: { text: string; edge: number }): string {
+export function columns(
+  cols: { text: string; x: number }[],
+  limit: number,
+  right?: { text: string; edge: number },
+): string {
   let line = ''
   let pen = 0
   const tail = right ? fit(right.text, right.edge / 2) : ''
@@ -80,7 +84,10 @@ function gap(l: string, r: string, px: number): string {
 export function ago(seconds: number, precise = false): string {
   const s = Math.max(0, Math.floor(seconds))
   const two = (n: number) => String(n).padStart(2, '0')
-  if (precise) return s < 3600 ? `${Math.floor(s / 60)}:${two(s % 60)}` : `${Math.floor(s / 3600)}:${two(Math.floor(s / 60) % 60)}:${two(s % 60)}`
+  if (precise)
+    return s < 3600
+      ? `${Math.floor(s / 60)}:${two(s % 60)}`
+      : `${Math.floor(s / 3600)}:${two(Math.floor(s / 60) % 60)}:${two(s % 60)}`
   if (s < 3600) return `${Math.floor(s / 60)}m`
   return s < 86400 ? `${Math.floor(s / 3600)}h` : `${Math.floor(s / 86400)}d`
 }

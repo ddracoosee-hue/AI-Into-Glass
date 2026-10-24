@@ -15,6 +15,7 @@ The take records continuously while the driver notes a mark at each moment that 
 then keeps the beat windows around those marks (BEATS) and burns in one caption per beat from
 demo/captions.srt. Deliverables land in H:/glasses/demo/.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -55,7 +56,12 @@ BEATS = [
     ("running", "What's running, where, for how long.", [("b2", 0.0, "run-detail", 6.5)], "present"),
     ("failure", "Failures surface on their own.", [("b3", -0.5, "error-open", 3.5)], "present"),
     ("projects", "Every project is its own deck.", [("b4", 0.0, "sessions", 2.0)], "present"),
-    ("focus", "In focus, nothing else can interrupt.", [("b5", 0.0, "focus-on", 2.5), ("hub-asks", -1.0, "outside", 3.0)], "present"),
+    (
+        "focus",
+        "In focus, nothing else can interrupt.",
+        [("b5", 0.0, "focus-on", 2.5), ("hub-asks", -1.0, "outside", 3.0)],
+        "present",
+    ),
     ("approve", "Prompts cut through any screen. One tap.", [("push-prompt", -1.5, "push-restored", 4.5)], "present"),
     ("deny", "Two taps to say no.", [("rm-prompt", -1.5, "rm-reply", 3.0)], "present"),
     ("todo", "Real files. Real changes.", [("b8", 0.0, "todo-done", 3.0)], "todo"),
@@ -75,6 +81,7 @@ STILLS = [  # (file, beat, mark, offset)
 
 # ---- the cut (pure, tested by scripts/test_demo_run.py) ------------------------------------------
 
+
 def plan(marks: dict[str, float], beats=BEATS) -> list[dict]:
     """Beat windows in raw-take seconds, and where each lands in the output."""
     out, at = [], 0.0
@@ -86,7 +93,16 @@ def plan(marks: dict[str, float], beats=BEATS) -> list[dict]:
                 raise ValueError(f"{key}: window {start_mark}..{end_mark} is empty")
             segs.append((round(start, 3), round(end, 3)))
         length = sum(e - s for s, e in segs) if segs else CLOSING_SECONDS
-        out.append({"key": key, "caption": caption, "pane": pane, "segments": segs, "out_start": round(at, 3), "out_end": round(at + length, 3)})
+        out.append(
+            {
+                "key": key,
+                "caption": caption,
+                "pane": pane,
+                "segments": segs,
+                "out_start": round(at, 3),
+                "out_end": round(at + length, 3),
+            }
+        )
         at += length
     return out
 
@@ -108,7 +124,9 @@ def srt_time(t: float) -> str:
 
 
 def to_srt(cut: list[dict]) -> str:
-    return "\n".join(f"{i}\n{srt_time(b['out_start'])} --> {srt_time(b['out_end'])}\n{b['caption']}\n" for i, b in enumerate(cut, 1))
+    return "\n".join(
+        f"{i}\n{srt_time(b['out_start'])} --> {srt_time(b['out_end'])}\n{b['caption']}\n" for i, b in enumerate(cut, 1)
+    )
 
 
 def from_srt(text: str) -> list[str]:
@@ -173,12 +191,26 @@ class Claude:
         self.asks: list[dict] = []
         self.results = 0
         term.open(name, f"claude · {cwd.name}")
-        cmd = ["claude", "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-               "--permission-prompt-tool", "stdio", "--setting-sources", "project,local", "--model", MODEL]
+        cmd = [
+            "claude",
+            "-p",
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--permission-prompt-tool",
+            "stdio",
+            "--setting-sources",
+            "project,local",
+            "--model",
+            MODEL,
+        ]
         if allow:  # what the session may run without asking (project settings' rules didn't apply here)
             cmd += ["--allowedTools", *allow]
-        self.proc = subprocess.Popen(cmd, cwd=cwd, env=demo_env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                     stderr=subprocess.DEVNULL)
+        self.proc = subprocess.Popen(
+            cmd, cwd=cwd, env=demo_env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+        )
         record_pid(self.proc.pid)
         threading.Thread(target=self.read, daemon=True).start()
 
@@ -188,9 +220,22 @@ class Claude:
 
     def answer(self, behavior: str, message: str = "") -> None:
         for ask in self.asks:
-            body = {"behavior": behavior, "message": message} if behavior == "deny" else {"behavior": "allow", "updatedInput": ask["request"]["input"]}
-            self.write({"type": "control_response", "response": {"subtype": "success", "request_id": ask["request_id"], "response": body}})
-            self.term.add(self.name, "dim" if behavior == "deny" else "good", f"  {'Denied' if behavior == 'deny' else 'Allowed'} at the terminal.")
+            body = (
+                {"behavior": behavior, "message": message}
+                if behavior == "deny"
+                else {"behavior": "allow", "updatedInput": ask["request"]["input"]}
+            )
+            self.write(
+                {
+                    "type": "control_response",
+                    "response": {"subtype": "success", "request_id": ask["request_id"], "response": body},
+                }
+            )
+            self.term.add(
+                self.name,
+                "dim" if behavior == "deny" else "good",
+                f"  {'Denied' if behavior == 'deny' else 'Allowed'} at the terminal.",
+            )
         self.asks.clear()
 
     def write(self, msg: dict) -> None:
@@ -217,8 +262,12 @@ class Claude:
             if kind == "control_request" and msg.get("request", {}).get("subtype") == "can_use_tool":
                 req = msg["request"]
                 self.asks.append(msg)
-                self.term.add(self.name, "ask", f"Allow {req.get('tool_name')}({brief(req.get('tool_name', ''), req.get('input', {}))})? "
-                                                "Waiting for you, here in the terminal.")
+                self.term.add(
+                    self.name,
+                    "ask",
+                    f"Allow {req.get('tool_name')}({brief(req.get('tool_name', ''), req.get('input', {}))})? "
+                    "Waiting for you, here in the terminal.",
+                )
                 self.marks.setdefault(f"{self.name}-asks", time.time())
                 # Claude Code asks its terminal while the PermissionRequest hook runs; the first answer
                 # wins. Only these asks are in the beat sheet: the glasses answer the first two, and the
@@ -235,12 +284,18 @@ class Claude:
                     if part.get("type") == "text" and part.get("text", "").strip():
                         self.term.add(self.name, "text", f"● {part['text'].strip()}")
                     elif part.get("type") == "tool_use":
-                        self.term.add(self.name, "tool", f"● {part['name']}({brief(part['name'], part.get('input', {}))})")
+                        self.term.add(
+                            self.name, "tool", f"● {part['name']}({brief(part['name'], part.get('input', {}))})"
+                        )
             elif kind == "user":
                 for part in msg["message"].get("content", []):
                     if isinstance(part, dict) and part.get("type") == "tool_result":
                         content = part.get("content")
-                        text = content if isinstance(content, str) else " ".join(c.get("text", "") for c in content or [] if isinstance(c, dict))
+                        text = (
+                            content
+                            if isinstance(content, str)
+                            else " ".join(c.get("text", "") for c in content or [] if isinstance(c, dict))
+                        )
                         lines = [l for l in text.splitlines() if l.strip()][:4] or ["(no output)"]
                         cls = "bad" if part.get("is_error") else "result"
                         for i, line in enumerate(lines):
@@ -252,7 +307,10 @@ class Claude:
 
 class Codex:
     """`codex exec`, its output printed as it arrives."""
-    SKIP = re.compile(r"^(hook: |\d{4}-\d\d-\d\dT|warning: |OpenAI Codex|-{4,}|workdir:|model:|provider:|approval:|sandbox:|reasoning|session id|tokens used|[\d,]+$)")
+
+    SKIP = re.compile(
+        r"^(hook: |\d{4}-\d\d-\d\dT|warning: |OpenAI Codex|-{4,}|workdir:|model:|provider:|approval:|sandbox:|reasoning|session id|tokens used|[\d,]+$)"
+    )
 
     def __init__(self, cwd: Path, prompt: str, term: Terminal, marks: dict):
         self.term, self.marks = term, marks
@@ -261,10 +319,31 @@ class Codex:
         trust = f'projects."{str(cwd).lower()}".trust_level="trusted"'.replace("\\", "\\\\")
         # -s danger-full-access: Codex's Windows sandbox can't start while the Codex desktop app holds
         # one of its runtime files (docs/plan-deltas.md A7). The prompt only runs the test suite.
-        cmd = [*sim.codex_cmd(), "exec", "--dangerously-bypass-hook-trust", "-c", trust, "-c", "model_reasoning_effort=low",
-               "-s", "danger-full-access", "-C", str(cwd), prompt]
-        self.proc = subprocess.Popen(cmd, cwd=cwd, env=demo_env(), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                     stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
+        cmd = [
+            *sim.codex_cmd(),
+            "exec",
+            "--dangerously-bypass-hook-trust",
+            "-c",
+            trust,
+            "-c",
+            "model_reasoning_effort=low",
+            "-s",
+            "danger-full-access",
+            "-C",
+            str(cwd),
+            prompt,
+        ]
+        self.proc = subprocess.Popen(
+            cmd,
+            cwd=cwd,
+            env=demo_env(),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
         record_pid(self.proc.pid)
         threading.Thread(target=self.read, daemon=True).start()
 
@@ -293,7 +372,9 @@ class Codex:
                     continue
             if mode == "output":
                 if line.strip():
-                    self.term.add("codex", "bad" if re.search(r"FAIL|Error|Traceback", line) else "result", f"     {line[:160]}")
+                    self.term.add(
+                        "codex", "bad" if re.search(r"FAIL|Error|Traceback", line) else "result", f"     {line[:160]}"
+                    )
                 continue
             if mode == "codex" and line.strip():
                 self.term.add("codex", "text", f"● {line.strip()}")
@@ -308,6 +389,7 @@ def record_pid(pid: int) -> None:
 
 
 # ---- panes and capture ------------------------------------------------------------------------------
+
 
 def pane_server(term: Terminal) -> ThreadingHTTPServer:
     class Handler(BaseHTTPRequestHandler):
@@ -330,7 +412,9 @@ def pane_server(term: Terminal) -> ThreadingHTTPServer:
                 return self.send(json.dumps(term.state()).encode(), "application/json")
             if path == "/todo.json":
                 lines = (GLASSES / "TODO.md").read_text(encoding="utf-8").splitlines()
-                return self.send(json.dumps({"name": "demo-glasses/TODO.md", "lines": lines}).encode(), "application/json")
+                return self.send(
+                    json.dumps({"name": "demo-glasses/TODO.md", "lines": lines}).encode(), "application/json"
+                )
             self.send_response(404)
             self.end_headers()
 
@@ -351,11 +435,18 @@ class Capture:
         self.stop = threading.Event()
         self.late: list[tuple[float, float]] = []  # (from, to): the framebuffer went unread, and changed meanwhile
         cdp = ["node", str(ROOT / "scripts" / "cdp.mjs"), "record"]
-        self.casts = [subprocess.Popen([*cdp, url, str(take / name), w, h, "1", "900", str(self.stopfile)],
-                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                      for name, url, w, h in (("terminal", f"http://127.0.0.1:{PANE_PORT}/terminal", "768", "540"),
-                                              ("present", "http://127.0.0.1:8799/present", "1536", "1080"),
-                                              ("todo", f"http://127.0.0.1:{PANE_PORT}/todo", "768", "540"))]
+        self.casts = [
+            subprocess.Popen(
+                [*cdp, url, str(take / name), w, h, "1", "900", str(self.stopfile)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            for name, url, w, h in (
+                ("terminal", f"http://127.0.0.1:{PANE_PORT}/terminal", "768", "540"),
+                ("present", "http://127.0.0.1:8799/present", "1536", "1080"),
+                ("todo", f"http://127.0.0.1:{PANE_PORT}/todo", "768", "540"),
+            )
+        ]
         self.thread = threading.Thread(target=self.glasses, daemon=True)
         self.thread.start()
         time.sleep(4)  # the screencasts' first frames
@@ -382,8 +473,20 @@ class Capture:
         for p in self.casts:
             p.wait(30)
         self.thread.join(5)
-        subprocess.run(["node", str(ROOT / "scripts" / "cdp.mjs"), "shot", f"http://127.0.0.1:{PANE_PORT}/card", str(self.take / "card.png"),
-                        "1920", "1080", "1500"], capture_output=True, timeout=60)
+        subprocess.run(
+            [
+                "node",
+                str(ROOT / "scripts" / "cdp.mjs"),
+                "shot",
+                f"http://127.0.0.1:{PANE_PORT}/card",
+                str(self.take / "card.png"),
+                "1920",
+                "1080",
+                "1500",
+            ],
+            capture_output=True,
+            timeout=60,
+        )
 
 
 # ---- the drive ----------------------------------------------------------------------------------------
@@ -422,11 +525,24 @@ def drive(record: bool) -> dict:
     initial_build = len(list((GLASSES / "build").iterdir()))
     mark("start")
     hub = Claude("hub", HUB, term, marks)
-    glasses = Claude("glasses", GLASSES, term, marks, allow=[f"{t}(python tools/render.py{x})" for t in ("Bash", "PowerShell") for x in ("", ":*")])
+    glasses = Claude(
+        "glasses",
+        GLASSES,
+        term,
+        marks,
+        allow=[f"{t}(python tools/render.py{x})" for t in ("Bash", "PowerShell") for x in ("", ":*")],
+    )
     hub.send("Reply with the single word: ready.")
-    glasses.send("Use the Bash tool to run python tools/render.py once. It takes about half a minute. Then reply with the single word: rendered.")
-    codex = Codex(HUB, "Run the test suite right away, before anything else: python -m unittest discover -s tests. "
-                       "Don't change any files and don't try to fix anything. Then reply with one short sentence.", term, marks)
+    glasses.send(
+        "Use the Bash tool to run python tools/render.py once. It takes about half a minute. Then reply with the single word: rendered."
+    )
+    codex = Codex(
+        HUB,
+        "Run the test suite right away, before anything else: python -m unittest discover -s tests. "
+        "Don't change any files and don't try to fix anything. Then reply with one short sentence.",
+        term,
+        marks,
+    )
     term.show("codex")
     summary = None
     try:
@@ -438,14 +554,30 @@ def drive(record: bool) -> dict:
         mark("b2")
         run.goto("running")
         run.do("click", r"page running:focus: depth 2", pause=1.4)
-        test_run = wait_for(lambda: next((r["id"] for r in sim.deck_get("/runs?scope=focus&active=1")["items"]
-                                          if r["agent"] == "codex" and "unittest" in r["target"]), None), 20, "the suite's run", run)
+        test_run = wait_for(
+            lambda: next(
+                (
+                    r["id"]
+                    for r in sim.deck_get("/runs?scope=focus&active=1")["items"]
+                    if r["agent"] == "codex" and "unittest" in r["target"]
+                ),
+                None,
+            ),
+            20,
+            "the suite's run",
+            run,
+        )
         run.goto(test_run or "")
         run.do("click", r"page run:", pause=0)
         mark("run-detail")
         time.sleep(6.5)
         # B3: the suite fails; the spotlight pins to the Deck; open it.
-        wait_for(lambda: any(e["agent"] == "codex" for e in sim.deck_get("/deck?scope=focus")["errors"]), 60, "the suite's failure", run)
+        wait_for(
+            lambda: any(e["agent"] == "codex" for e in sim.deck_get("/deck?scope=focus")["errors"]),
+            60,
+            "the suite's failure",
+            run,
+        )
         time.sleep(1.2)
         mark("b3")
         run.do("double", r"page running:focus: depth 2", pause=1.0)
@@ -478,11 +610,18 @@ def drive(record: bool) -> dict:
         mark("focus-on")
         time.sleep(2.6)
         term.show("hub")
-        hub.send("Create a file notes.md containing the line: retry budget is 3. Use the Write tool, one call. If it isn't allowed, don't retry.")
+        hub.send(
+            "Create a file notes.md containing the line: retry budget is 3. Use the Write tool, one call. If it isn't allowed, don't retry."
+        )
         wait_for(lambda: marks.get("hub-asks"), 60, "the hub session's terminal prompt", run)
         time.sleep(0.8)
         run.do("double", r"page deck:focus: depth 1", pause=0)
-        wait_for(lambda: (sim.deck_get("/deck?scope=focus")["outside_focus"] or {}).get("waiting"), 10, "outside focus: 1 waiting", run)
+        wait_for(
+            lambda: (sim.deck_get("/deck?scope=focus")["outside_focus"] or {}).get("waiting"),
+            10,
+            "outside focus: 1 waiting",
+            run,
+        )
         time.sleep(0.6)
         mark("outside")
         time.sleep(3.2)
@@ -500,7 +639,9 @@ def drive(record: bool) -> dict:
         wait_for(lambda: marks.get("glasses-result-2"), 40, "Claude continuing after the push", run)
         time.sleep(3.2)
         # B7: rm -r build; two taps; denied, and build/ is still there.
-        glasses.send("Run exactly one Bash command: rm -r build. If it is denied, don't retry; reply in one short sentence.")
+        glasses.send(
+            "Run exactly one Bash command: rm -r build. If it is denied, don't retry; reply in one short sentence."
+        )
         run.expect(r"\[deck\] prompt req_\w+ over sessions:focus:", 60)
         mark("rm-prompt")
         time.sleep(1.6)
@@ -549,10 +690,12 @@ def drive(record: bool) -> dict:
         "every step happened, no console errors": not run.failures,
         "the push reached origin": _pushed(),
         "build/ intact after the deny": len(list((GLASSES / "build").iterdir())) == initial_build,
-        "TODO.md: README threat model is [x]": "- [x] README threat model" in (GLASSES / "TODO.md").read_text(encoding="utf-8"),
+        "TODO.md: README threat model is [x]": "- [x] README threat model"
+        in (GLASSES / "TODO.md").read_text(encoding="utf-8"),
         "the out-of-focus write never happened": not (HUB / "notes.md").exists(),
-        "summary: 1 approved, 1 denied, 1 to-do": bool(summary) and json.loads(summary.split(" ", 3)[3]) | {"minutes": 0, "runs": 0} ==
-            {"minutes": 0, "approved": 1, "denied": 1, "runs": 0, "todos": 1},
+        "summary: 1 approved, 1 denied, 1 to-do": bool(summary)
+        and json.loads(summary.split(" ", 3)[3]) | {"minutes": 0, "runs": 0}
+        == {"minutes": 0, "approved": 1, "denied": 1, "runs": 0, "todos": 1},
     }
     late = []
     if capture:  # a stalled capture shows a change late: past a second, captions and stills can miss their moment
@@ -562,20 +705,31 @@ def drive(record: bool) -> dict:
         checks[f"every glasses change captured within 1 s (worst {worst:.1f} s)"] = worst <= 1.0
     start_ms = int(marks["start"] * 1000)
     marks = {k: round(v - marks["start"], 3) for k, v in marks.items()}
-    return {"marks": marks, "start_ms": start_ms, "checks": checks, "failures": run.failures, "seconds": marks.get("summary", 0),
-            "late": late}
+    return {
+        "marks": marks,
+        "start_ms": start_ms,
+        "checks": checks,
+        "failures": run.failures,
+        "seconds": marks.get("summary", 0),
+        "late": late,
+    }
 
 
 def _pushed() -> bool:
     """The stage leaves one commit unpushed; after the approved push, origin has it."""
-    head = lambda repo: subprocess.run(["git", "-C", str(repo), "rev-parse", "main"], capture_output=True, text=True).stdout.strip()
+    head = lambda repo: subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "main"], capture_output=True, text=True
+    ).stdout.strip()
     return bool(head(GLASSES)) and head(DEMO / "demo-glasses-origin.git") == head(GLASSES)
 
 
 # ---- compose ---------------------------------------------------------------------------------------------
 
+
 def ffmpeg() -> str:
-    found = shutil.which("ffmpeg") or str(Path(os.environ["LOCALAPPDATA"]) / "Microsoft" / "WinGet" / "Links" / "ffmpeg.exe")
+    found = shutil.which("ffmpeg") or str(
+        Path(os.environ["LOCALAPPDATA"]) / "Microsoft" / "WinGet" / "Links" / "ffmpeg.exe"
+    )
     if not Path(found).exists():
         sys.exit("ffmpeg isn't installed (winget install Gyan.FFmpeg.Essentials)")
     return found
@@ -593,7 +747,9 @@ def frames_to_video(folder: Path, t0_ms: int, t1_ms: int, out: Path, size: str, 
     if not frames:
         raise SystemExit(f"no frames in {folder}")
     before = [f for f in frames if f[0] <= t0_ms]
-    seq = ([(t0_ms, before[-1][1])] if before else [(t0_ms, frames[0][1])]) + [f for f in frames if t0_ms < f[0] < t1_ms]
+    seq = ([(t0_ms, before[-1][1])] if before else [(t0_ms, frames[0][1])]) + [
+        f for f in frames if t0_ms < f[0] < t1_ms
+    ]
     lines = ["ffconcat version 1.0"]
     for (t, path), nxt in zip(seq, seq[1:] + [(t1_ms, None)]):
         lines += [f"file '{path.as_posix()}'", f"duration {(nxt[0] - t) / 1000:.3f}"]
@@ -604,12 +760,46 @@ def frames_to_video(folder: Path, t0_ms: int, t1_ms: int, out: Path, size: str, 
         # The simulator's framebuffer is RGBA: dark pixels are green with alpha 0, and brightness is
         # alpha. Laid over black it looks like the display; with the alpha dropped it is a green slab.
         w, h = 576, 288
-        ff("-f", "concat", "-safe", "0", "-i", str(listing), "-filter_complex",
-           f"color=c=black:s={w}x{h}:r={FPS}[bg];[0:v]fps={FPS},format=rgba[fg];[bg][fg]overlay=shortest=1,"
-           f"scale={size}:flags={flags},format=yuv420p", "-c:v", "libx264", "-preset", "veryfast", "-crf", "14", "-r", str(FPS), str(out))
+        ff(
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(listing),
+            "-filter_complex",
+            f"color=c=black:s={w}x{h}:r={FPS}[bg];[0:v]fps={FPS},format=rgba[fg];[bg][fg]overlay=shortest=1,"
+            f"scale={size}:flags={flags},format=yuv420p",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "14",
+            "-r",
+            str(FPS),
+            str(out),
+        )
         return
-    ff("-f", "concat", "-safe", "0", "-i", str(listing), "-vf", f"fps={FPS},scale={size}:flags={flags},format=yuv420p",
-       "-c:v", "libx264", "-preset", "veryfast", "-crf", "14", "-r", str(FPS), str(out))
+    ff(
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        str(listing),
+        "-vf",
+        f"fps={FPS},scale={size}:flags={flags},format=yuv420p",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "14",
+        "-r",
+        str(FPS),
+        str(out),
+    )
 
 
 def compose(work: Path, pane: str, s: float, e: float, caption: Path, out: Path) -> None:
@@ -617,15 +807,37 @@ def compose(work: Path, pane: str, s: float, e: float, caption: Path, out: Path)
     on the right, and the caption burned in. Reads the pane videos frames_to_video left in `work`."""
     span = ["-ss", f"{s:.3f}", "-t", f"{e - s:.3f}"]
     label = "Even Hub simulator · G2 display"
-    ff(*span, "-i", str(work / "glasses.mp4"), *span, "-i", str(work / "terminal.mp4"), *span, "-i", str(work / f"{pane}.mp4"),
-       "-filter_complex",
-       f"color=c=0x070b08:s=1920x1080:r={FPS}:d={e - s:.3f}[bg];"
-       "[bg][0:v]overlay=0:252[a];[a][1:v]overlay=1152:0[b];[b][2:v]overlay=1152:540[c];"
-       "[c]drawbox=x=1150:y=0:w=2:h=1080:color=0x22362a:t=fill,drawbox=x=1152:y=539:w=768:h=2:color=0x22362a:t=fill,"
-       f"drawtext=fontfile='{FONT}':text='{label}':fontsize=30:fontcolor=0x9bb8a3:x=(1152-text_w)/2:y=190,"
-       f"drawtext=fontfile='{FONT_BOLD}':textfile='{caption.as_posix().replace(':', chr(92) + ':')}':fontsize=46:fontcolor=white:"
-       "box=1:boxcolor=black@0.7:boxborderw=22:x=(w-text_w)/2:y=h-170[v]",
-       "-map", "[v]", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-pix_fmt", "yuv420p", "-r", str(FPS), str(out))
+    ff(
+        *span,
+        "-i",
+        str(work / "glasses.mp4"),
+        *span,
+        "-i",
+        str(work / "terminal.mp4"),
+        *span,
+        "-i",
+        str(work / f"{pane}.mp4"),
+        "-filter_complex",
+        f"color=c=0x070b08:s=1920x1080:r={FPS}:d={e - s:.3f}[bg];"
+        "[bg][0:v]overlay=0:252[a];[a][1:v]overlay=1152:0[b];[b][2:v]overlay=1152:540[c];"
+        "[c]drawbox=x=1150:y=0:w=2:h=1080:color=0x22362a:t=fill,drawbox=x=1152:y=539:w=768:h=2:color=0x22362a:t=fill,"
+        f"drawtext=fontfile='{FONT}':text='{label}':fontsize=30:fontcolor=0x9bb8a3:x=(1152-text_w)/2:y=190,"
+        f"drawtext=fontfile='{FONT_BOLD}':textfile='{caption.as_posix().replace(':', chr(92) + ':')}':fontsize=46:fontcolor=white:"
+        "box=1:boxcolor=black@0.7:boxborderw=22:x=(w-text_w)/2:y=h-170[v]",
+        "-map",
+        "[v]",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "16",
+        "-pix_fmt",
+        "yuv420p",
+        "-r",
+        str(FPS),
+        str(out),
+    )
 
 
 def cut(take: dict) -> None:
@@ -634,8 +846,12 @@ def cut(take: dict) -> None:
     end = t0 + int((max(marks.values()) + 2) * 1000)
     work = TAKE / "work"
     work.mkdir(exist_ok=True)
-    sources = {"glasses": ("glasses", "1152:576", "neighbor"), "terminal": ("terminal", "768:540", "lanczos"),
-               "present": ("present", "768:540", "lanczos"), "todo": ("todo", "768:540", "lanczos")}
+    sources = {
+        "glasses": ("glasses", "1152:576", "neighbor"),
+        "terminal": ("terminal", "768:540", "lanczos"),
+        "present": ("present", "768:540", "lanczos"),
+        "todo": ("todo", "768:540", "lanczos"),
+    }
     for name, (folder, size, flags) in sources.items():
         frames_to_video(TAKE / folder, t0, end, work / f"{name}.mp4", size, flags)
     plan_ = plan(marks)
@@ -650,12 +866,29 @@ def cut(take: dict) -> None:
     captions = [b["caption"] for b in plan_]
     pieces = []
     for i, beat in enumerate(plan_):
-        caption = (work / f"caption-{i}.txt")
+        caption = work / f"caption-{i}.txt"
         caption.write_text(captions[i] if i < len(captions) else beat["caption"], encoding="utf-8")
         if beat["pane"] == "card":
             out = work / f"beat-{i:02d}.mp4"
-            ff("-loop", "1", "-t", str(CLOSING_SECONDS), "-i", str(TAKE / "card.png"), "-vf", f"scale=1920:1080,fps={FPS},format=yuv420p",
-               "-c:v", "libx264", "-preset", "veryfast", "-crf", "14", "-r", str(FPS), str(out))
+            ff(
+                "-loop",
+                "1",
+                "-t",
+                str(CLOSING_SECONDS),
+                "-i",
+                str(TAKE / "card.png"),
+                "-vf",
+                f"scale=1920:1080,fps={FPS},format=yuv420p",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "14",
+                "-r",
+                str(FPS),
+                str(out),
+            )
             pieces.append(out)
             continue
         for j, (s, e) in enumerate(beat["segments"]):
@@ -665,8 +898,25 @@ def cut(take: dict) -> None:
     listing = work / "pieces.txt"
     listing.write_text("\n".join(f"file '{p.as_posix()}'" for p in pieces))
     final = OUT / "command-deck-demo.mp4"
-    ff("-f", "concat", "-safe", "0", "-i", str(listing), "-c:v", "libx264", "-preset", "slow", "-crf", "18", "-pix_fmt", "yuv420p",
-       "-movflags", "+faststart", str(final))
+    ff(
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        str(listing),
+        "-c:v",
+        "libx264",
+        "-preset",
+        "slow",
+        "-crf",
+        "18",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        str(final),
+    )
     for name, beat, mark_name, offset in STILLS:
         t = out_time(plan_, beat, marks[mark_name] + offset)
         ff("-ss", f"{t:.3f}", "-i", str(final), "-frames:v", "1", str(OUT / name))
@@ -675,13 +925,23 @@ def cut(take: dict) -> None:
     length = min(8.0, approve["out_end"] - start)
     gif = OUT / "deck-loop.gif"
     for width, fps in ((960, 12), (800, 10), (640, 10)):
-        ff("-ss", f"{start:.3f}", "-t", f"{length:.3f}", "-i", str(final), "-filter_complex",
-           f"fps={fps},scale={width}:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96[p];[b][p]paletteuse=dither=bayer:bayer_scale=4",
-           str(gif))
+        ff(
+            "-ss",
+            f"{start:.3f}",
+            "-t",
+            f"{length:.3f}",
+            "-i",
+            str(final),
+            "-filter_complex",
+            f"fps={fps},scale={width}:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96[p];[b][p]paletteuse=dither=bayer:bayer_scale=4",
+            str(gif),
+        )
         if gif.stat().st_size <= 5 * 1024 * 1024:
             break
     total = plan_[-1]["out_end"]
-    print(f"Cut {final} ({total:.1f} s), {len(STILLS)} stills, {gif.name} ({gif.stat().st_size / 1e6:.2f} MB, {length:.1f} s)")
+    print(
+        f"Cut {final} ({total:.1f} s), {len(STILLS)} stills, {gif.name} ({gif.stat().st_size / 1e6:.2f} MB, {length:.1f} s)"
+    )
     for b in plan_:
         print(f"  {b['out_start']:6.1f}-{b['out_end']:6.1f}  {b['key']:<9} {b['caption']}")
 

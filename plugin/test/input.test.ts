@@ -24,19 +24,32 @@ function rig(initial: Screen) {
   let nextTimer = 1
   const timers = new Map<number, { at: number; fn: () => void }>()
   const calls: string[] = []
-  const record = (name: string) => (...args: unknown[]) => void calls.push([name, ...args].join(':'))
-  const input = createInput(() => screen, {
-    approve: record('approve'), deny: record('deny'), arm: record('arm'), disarm: record('disarm'),
-    exit: record('exit'), retry: record('retry'), swipe: record('swipe'),
-    foreground: record('foreground'), systemExit: record('systemExit'),
-  }, {
-    now: () => t,
-    setTimeout: (fn, ms) => {
-      timers.set(nextTimer, { at: t + ms, fn })
-      return nextTimer++
+  const record =
+    (name: string) =>
+    (...args: unknown[]) =>
+      void calls.push([name, ...args].join(':'))
+  const input = createInput(
+    () => screen,
+    {
+      approve: record('approve'),
+      deny: record('deny'),
+      arm: record('arm'),
+      disarm: record('disarm'),
+      exit: record('exit'),
+      retry: record('retry'),
+      swipe: record('swipe'),
+      foreground: record('foreground'),
+      systemExit: record('systemExit'),
     },
-    clearTimeout: handle => void timers.delete(handle as number),
-  })
+    {
+      now: () => t,
+      setTimeout: (fn, ms) => {
+        timers.set(nextTimer, { at: t + ms, fn })
+        return nextTimer++
+      },
+      clearTimeout: handle => void timers.delete(handle as number),
+    },
+  )
   return {
     calls,
     send: (event: object) => input.handle(event as HubEvent),

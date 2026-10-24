@@ -12,6 +12,7 @@ caller that serves the phone is a project id, a project-relative path or a count
       "unmapped": "other"
     }
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -55,7 +56,7 @@ def under(path: str, root: str) -> str | None:
     if p == r:
         return ""
     prefix = r if r.endswith("/") else r + "/"
-    return norm(path)[len(prefix):] if p.startswith(prefix) else None
+    return norm(path)[len(prefix) :] if p.startswith(prefix) else None
 
 
 @dataclass
@@ -70,6 +71,7 @@ class Project:
 @dataclass
 class Placement:
     """Where a working directory sits. `base` is the directory paths are made relative to."""
+
     project: str
     base: str
     folder: str
@@ -100,7 +102,11 @@ class Projects:
             self.unmapped = "hide" if data.get("unmapped") == "hide" else "other"
             for p in data.get("projects", []):
                 pid, root = str(p.get("id", "")), p.get("root")
-                if not ID_RE.fullmatch(pid) or not isinstance(root, str) or not os.path.isabs(root.replace("/", os.sep)):
+                if (
+                    not ID_RE.fullmatch(pid)
+                    or not isinstance(root, str)
+                    or not os.path.isabs(root.replace("/", os.sep))
+                ):
                     raise ValueError(f"project needs an id like 'glasses' and an absolute root: {pid!r}")
                 todos = [t for t in p.get("todos", []) if isinstance(t, str)]
                 name = str(p.get("name") or pid)[:24]
@@ -124,7 +130,7 @@ class Projects:
             rel = under(cwd, best.root) or ""
             for wt in WORKTREE_DIRS:  # <root>/.claude/worktrees/<name>/...
                 if rel.lower().startswith(wt + "/"):
-                    tag = rel[len(wt) + 1:].split("/")[0]
+                    tag = rel[len(wt) + 1 :].split("/")[0]
                     return Placement(best.id, f"{best.root.rstrip('/')}/{wt}/{tag}", tag, tag)
             return Placement(best.id, best.root, Path(best.root).name)
         main, tree = worktree_main(cwd)
@@ -175,17 +181,29 @@ class Projects:
         for entry in p.todos if p else []:
             if entry.startswith("obsidian:"):
                 if self.vault:
-                    out.append((entry, Path(self.vault) / entry[len("obsidian:"):]))
+                    out.append((entry, Path(self.vault) / entry[len("obsidian:") :]))
             else:
                 out.append((entry, Path(p.root) / entry))
-        return [(label, f) for label, f in out if contained(f, Path(self.vault if label.startswith("obsidian:") else p.root))]
+        return [
+            (label, f)
+            for label, f in out
+            if contained(f, Path(self.vault if label.startswith("obsidian:") else p.root))
+        ]
 
     def todos(self, pid: str) -> list[dict]:
         items = []
         for label, path in self.todo_files(pid):
             for todo_id, done, text in scan(path, pid, label):
-                items.append({"id": todo_id, "project": pid, "text": text, "source": "obsidian" if label.startswith("obsidian:") else "todo-file",
-                              "file": label.split(":", 1)[1] if label.startswith("obsidian:") else label, "done": done})
+                items.append(
+                    {
+                        "id": todo_id,
+                        "project": pid,
+                        "text": text,
+                        "source": "obsidian" if label.startswith("obsidian:") else "todo-file",
+                        "file": label.split(":", 1)[1] if label.startswith("obsidian:") else label,
+                        "done": done,
+                    }
+                )
         return items
 
     def mark_done(self, pid: str, todo_id: str) -> str:
@@ -227,9 +245,14 @@ def git_info(root: str) -> dict:
 
     def run(*args: str) -> str | None:
         try:
-            out = subprocess.run(["git", "-c", f"safe.directory={norm(root)}", "-C", root, *args], capture_output=True,
-                                 timeout=GIT_TIMEOUT, env=env, stdin=subprocess.DEVNULL,
-                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            out = subprocess.run(
+                ["git", "-c", f"safe.directory={norm(root)}", "-C", root, *args],
+                capture_output=True,
+                timeout=GIT_TIMEOUT,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
             return out.stdout.decode("utf-8", "replace") if out.returncode == 0 else None
         except (OSError, subprocess.TimeoutExpired):
             return None
@@ -239,8 +262,11 @@ def git_info(root: str) -> dict:
         branch = (run("rev-parse", "--short", "HEAD") or "").strip()
     status = run("status", "--porcelain=v1", "-z")
     log = run("log", "-5", "--format=%s")
-    return {"branch": branch[:40], "dirty": len([e for e in (status or "").split("\0") if e[:2].strip()]),
-            "commits": [s[:64] for s in (log or "").splitlines() if s.strip()][:5]}
+    return {
+        "branch": branch[:40],
+        "dirty": len([e for e in (status or "").split("\0") if e[:2].strip()]),
+        "commits": [s[:64] for s in (log or "").splitlines() if s.strip()][:5],
+    }
 
 
 def todo_id(pid: str, label: str, text: str, nth: int) -> str:
@@ -281,7 +307,7 @@ def mark(path: Path, pid: str, label: str, wanted: str) -> bool:
             continue
         nth = seen[raw] = seen.get(raw, -1) + 1
         if m[2] == " " and todo_id(pid, label, raw, nth) == wanted:
-            lines[i] = m[1] + "x" + line[len(m[1]) + 1:]
+            lines[i] = m[1] + "x" + line[len(m[1]) + 1 :]
             tmp = path.with_name(f".{path.name}.deck-{os.getpid()}.tmp")
             try:
                 tmp.write_bytes("".join(lines).encode("utf-8"))

@@ -10,6 +10,7 @@ beside it so `git push` works offline, and `state/` as APPROVAL_GATE_HOME. The d
 only these two repos, so no real project name or path can reach the video. Hooks go in each repo's
 own .claude/ and .codex/ (git-excluded), never in your user settings. Then run scripts/demo_run.py.
 """
+
 from __future__ import annotations
 
 import json
@@ -112,7 +113,7 @@ def retry(fn, attempts: int = 3):
 '''
 
 # About 20 s in all: each test waits like the I/O it stands in for. One fails, for a real reason.
-TESTS = '''import time
+TESTS = """import time
 import unittest
 
 from hub.queue import Queue
@@ -187,7 +188,7 @@ class RetryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-'''
+"""
 
 REPOS = {
     "demo-glasses": {
@@ -199,7 +200,7 @@ REPOS = {
     },
     "demo-hub": {
         "README.md": "# demo-hub\n\nA small job hub: a queue, retries with backoff, and a test suite that takes about 20 seconds.\n"
-                     "Run it with `python -m unittest discover -s tests`.\n",
+        "Run it with `python -m unittest discover -s tests`.\n",
         "TODO.md": "# TODO\n\n- [ ] wire Codex hooks\n- [ ] retry on 429\n- [ ] docs for the hub API\n",
         "hub/__init__.py": "",
         "hub/queue.py": QUEUE,
@@ -212,8 +213,12 @@ REPOS = {
 # Claude Code may run these without asking; anything else (push, rm, writes) asks.
 # On Windows Claude Code may use its PowerShell tool for the same command, so both forms are allowed.
 # Rules use Claude Code 2.1's `cmd *` form (the form it suggests itself).
-ALLOW = {"demo-glasses": [f"{t}(python tools/render.py{s})" for t in ("Bash", "PowerShell") for s in ("", " *")] + ["Read", "Glob", "Grep"],
-         "demo-hub": [f"{t}(python -m unittest{s})" for t in ("Bash", "PowerShell") for s in ("", " *")] + ["Read", "Glob", "Grep"]}
+ALLOW = {
+    "demo-glasses": [f"{t}(python tools/render.py{s})" for t in ("Bash", "PowerShell") for s in ("", " *")]
+    + ["Read", "Glob", "Grep"],
+    "demo-hub": [f"{t}(python -m unittest{s})" for t in ("Bash", "PowerShell") for s in ("", " *")]
+    + ["Read", "Glob", "Grep"],
+}
 
 
 def git(*args: str, cwd: Path | None = None) -> str:
@@ -227,6 +232,7 @@ def rmtree(path: Path) -> None:
     def unlock(func, name, _):
         os.chmod(name, stat.S_IWRITE)
         func(name)
+
     if path.exists():
         shutil.rmtree(path, onexc=unlock)
 
@@ -249,7 +255,9 @@ def build_repos() -> None:
         git("remote", "add", "origin", origin.as_posix(), cwd=repo)
         git("push", "-q", "-u", "origin", "main", cwd=repo)
         if name == "demo-glasses":  # one commit waits to be pushed: the demo's approval sends it
-            (repo / "notes" / "release.md").write_text("# Release\n\nRows fit the line. Prompts cut through.\n", encoding="utf-8")
+            (repo / "notes" / "release.md").write_text(
+                "# Release\n\nRows fit the line. Prompts cut through.\n", encoding="utf-8"
+            )
             git("add", "-A", cwd=repo)
             git("commit", "-qm", "Add the release note", cwd=repo)
         (repo / MARKER).touch()
@@ -266,20 +274,34 @@ def install_hooks() -> None:
         data = json.loads(settings.read_text(encoding="utf-8"))
         data["permissions"] = {"allow": ALLOW[name]}
         settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        subprocess.run([*install, "--codex", "--settings", str(repo / ".codex" / "hooks.json")], env=env(), check=True, capture_output=True)
+        subprocess.run(
+            [*install, "--codex", "--settings", str(repo / ".codex" / "hooks.json")],
+            env=env(),
+            check=True,
+            capture_output=True,
+        )
 
 
 def write_config() -> None:
     STATE.mkdir(parents=True, exist_ok=True)
-    config = {"projects": [{"id": name, "name": name, "root": (DEMO / name).as_posix(), "todos": ["TODO.md"]} for name in REPOS],
-              "unmapped": "hide"}
+    config = {
+        "projects": [
+            {"id": name, "name": name, "root": (DEMO / name).as_posix(), "todos": ["TODO.md"]} for name in REPOS
+        ],
+        "unmapped": "hide",
+    }
     (STATE / "deck.projects.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
     import relay as R
-    R.save_devices(STATE, {"dev_demo01": {"label": "demo simulator", "sha256": R.sha256(D.token()), "created_at": R.now_iso()}})
+
+    R.save_devices(
+        STATE, {"dev_demo01": {"label": "demo simulator", "sha256": R.sha256(D.token()), "created_at": R.now_iso()}}
+    )
 
 
 def render_build() -> None:
-    subprocess.run([sys.executable, "tools/render.py", "--fast"], cwd=DEMO / "demo-glasses", check=True, capture_output=True)
+    subprocess.run(
+        [sys.executable, "tools/render.py", "--fast"], cwd=DEMO / "demo-glasses", check=True, capture_output=True
+    )
 
 
 def fresh_relay() -> None:
@@ -288,7 +310,9 @@ def fresh_relay() -> None:
     for name in ("deck.log", "deck.log.1", "focus.json", "armed", "gate.log"):
         (STATE / name).unlink(missing_ok=True)
     D.start_relay()
-    subprocess.run([sys.executable, str(ROOT / "relay" / "gatectl.py"), "arm"], env=env(), check=True, capture_output=True)
+    subprocess.run(
+        [sys.executable, str(ROOT / "relay" / "gatectl.py"), "arm"], env=env(), check=True, capture_output=True
+    )
 
 
 def stop_agents() -> None:
@@ -331,7 +355,11 @@ def reset() -> None:
     for name in REPOS:
         repo, origin = DEMO / name, DEMO / f"{name}-origin.git"
         first = git("rev-list", "--max-parents=0", "HEAD", cwd=repo)
-        tip = git("rev-list", "-1", "--grep=^Add the release note$", "--all", cwd=repo) if name == "demo-glasses" else first
+        tip = (
+            git("rev-list", "-1", "--grep=^Add the release note$", "--all", cwd=repo)
+            if name == "demo-glasses"
+            else first
+        )
         git("reset", "-q", "--hard", tip or first, cwd=repo)
         git("clean", "-qfdx", "-e", ".claude", "-e", ".codex", "-e", MARKER, cwd=repo)
         git("update-ref", "refs/heads/main", first, cwd=origin)

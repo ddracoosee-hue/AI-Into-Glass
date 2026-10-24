@@ -18,6 +18,7 @@ Start the simulator with `--automation-port 9898` (`npm run simulate` in plugin/
 `run` needs the devstack (scripts/devstack.py up && seed && sim) and fails on any console error.
 scripts/demo.py imports this module and uses the same calls.
 """
+
 import json
 import os
 import urllib.error
@@ -30,8 +31,15 @@ import urllib.request
 from pathlib import Path
 
 BASE = "http://127.0.0.1:9898"
-ACTIONS = {"click": "click", "double": "double_click", "down": "down", "up": "up", "long": "long_press",
-           "release": "long_press_release", "menu": "context_menu"}
+ACTIONS = {
+    "click": "click",
+    "double": "double_click",
+    "down": "down",
+    "up": "up",
+    "long": "long_press",
+    "release": "long_press_release",
+    "menu": "context_menu",
+}
 ROOT = Path(__file__).resolve().parent.parent
 STATE = Path(os.environ.get("APPROVAL_GATE_HOME", "C:/deck-sandbox/state"))
 SHOTS = Path(os.environ.get("SIM_SHOTS", STATE / "shots"))
@@ -67,7 +75,9 @@ class Run:
 
     def __init__(self, name: str):
         self.name, self.failures = name, []
-        self.expected: list[str] = []  # console errors a run provokes on purpose (the simulator logs every non-2xx fetch)
+        self.expected: list[
+            str
+        ] = []  # console errors a run provokes on purpose (the simulator logs every non-2xx fetch)
         self.seen = max((e["id"] for e in console()), default=0)
         self.reported: set[int] = set()
         self.rows: tuple[str, int, list[str]] | None = None  # the plugin's latest `[deck] rows` line
@@ -130,11 +140,13 @@ class Run:
 
     def search(self, key: str) -> None:
         """The slow way: to the top, then down until the key comes up."""
+
         def swipe(direction: str) -> str | None:
             self.seen = max((e["id"] for e in console()), default=self.seen)
             send(direction)
             found = self.expect(r"\[deck\] cursor ", 3)
             return found.split(" ", 2)[2] if found else None
+
         for _ in range(12):
             send("up")
             time.sleep(0.15)
@@ -175,23 +187,43 @@ class Run:
 
 
 def gate(*args: str) -> None:
-    subprocess.run([sys.executable, str(ROOT / "relay" / "gatectl.py"), *args], env={**os.environ, "APPROVAL_GATE_HOME": str(STATE)},
-                   capture_output=True, check=True)
+    subprocess.run(
+        [sys.executable, str(ROOT / "relay" / "gatectl.py"), *args],
+        env={**os.environ, "APPROVAL_GATE_HOME": str(STATE)},
+        capture_output=True,
+        check=True,
+    )
 
 
 def inject_approval(summary: str = "git push origin main") -> str:
     """What the gate hook does: POST /requests with the hook key, as a session in the glasses project."""
-    body = {"session": {"agent": "claude-code", "name": "glasses", "cwd": "C:/deck-sandbox/glasses"}, "tool": "Bash",
-            "summary": summary, "detail": summary, "risk": "high"}
-    req = urllib.request.Request("http://127.0.0.1:8797/requests", data=json.dumps(body).encode(), method="POST",
-                                 headers={"Authorization": f"Bearer {(STATE / 'hook.key').read_text().strip()}", "Content-Type": "application/json"})
+    body = {
+        "session": {"agent": "claude-code", "name": "glasses", "cwd": "C:/deck-sandbox/glasses"},
+        "tool": "Bash",
+        "summary": summary,
+        "detail": summary,
+        "risk": "high",
+    }
+    req = urllib.request.Request(
+        "http://127.0.0.1:8797/requests",
+        data=json.dumps(body).encode(),
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {(STATE / 'hook.key').read_text().strip()}",
+            "Content-Type": "application/json",
+        },
+    )
     return json.load(urllib.request.urlopen(req, timeout=5))["id"]
 
 
 def at_root(run: Run) -> None:
     """Start from a fresh plugin at the Deck root."""
-    subprocess.run([sys.executable, str(ROOT / "scripts" / "devstack.py"), "sim"], check=True, capture_output=True,
-                   env={**os.environ, "DECK_STATE": str(STATE)})  # the simulator of whichever stack this run drives
+    subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "devstack.py"), "sim"],
+        check=True,
+        capture_output=True,
+        env={**os.environ, "DECK_STATE": str(STATE)},
+    )  # the simulator of whichever stack this run drives
     run.seen = 0
     run.expect(r"\[deck\] rebuild deck:focus:", 15)
     time.sleep(STEP + 1)
@@ -244,7 +276,10 @@ def run_interrupt() -> None:
 
 
 def deck_get(path: str):
-    req = urllib.request.Request(f"http://127.0.0.1:8797{path}", headers={"Authorization": f"Bearer {(STATE / 'dev-token.txt').read_text().strip()}"})
+    req = urllib.request.Request(
+        f"http://127.0.0.1:8797{path}",
+        headers={"Authorization": f"Bearer {(STATE / 'dev-token.txt').read_text().strip()}"},
+    )
     with urllib.request.urlopen(req, timeout=5) as resp:
         return json.load(resp)
 
@@ -252,12 +287,31 @@ def deck_get(path: str):
 def agent(cmd: list[str], cwd: str) -> subprocess.Popen:
     """A real Claude Code or Codex session in a devstack project, with the dev state dir."""
     log = open(STATE / f"agent-{Path(cwd).name}-{int(time.time() * 1000) % 100000}.log", "w", encoding="utf-8")
-    return subprocess.Popen(cmd, cwd=cwd, env={**os.environ, "APPROVAL_GATE_HOME": str(STATE)}, stdout=log, stderr=subprocess.STDOUT,
-                            stdin=subprocess.DEVNULL)
+    return subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        env={**os.environ, "APPROVAL_GATE_HOME": str(STATE)},
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL,
+    )
 
 
 def claude(prompt: str, cwd: str) -> subprocess.Popen:
-    return agent(["claude", "-p", prompt, "--setting-sources", "project,local", "--model", "sonnet", "--allowedTools", "Bash(python:*)"], cwd)
+    return agent(
+        [
+            "claude",
+            "-p",
+            prompt,
+            "--setting-sources",
+            "project,local",
+            "--model",
+            "sonnet",
+            "--allowedTools",
+            "Bash(python:*)",
+        ],
+        cwd,
+    )
 
 
 def codex_cmd() -> list[str]:
@@ -271,8 +325,23 @@ def codex(prompt: str, cwd: str) -> subprocess.Popen:
     # -s danger-full-access: Codex's Windows sandbox can't start while the Codex desktop app holds one
     # of its runtime files (docs/plan-deltas.md A7). The prompt is fixed and the repo is throwaway.
     trust = f'projects."{cwd.lower().replace("/", chr(92) + chr(92))}".trust_level="trusted"'
-    return agent([*codex_cmd(), "exec", "--dangerously-bypass-hook-trust", "-c", trust, "-c", "model_reasoning_effort=low",
-                  "-s", "danger-full-access", "-C", cwd, prompt], cwd)
+    return agent(
+        [
+            *codex_cmd(),
+            "exec",
+            "--dangerously-bypass-hook-trust",
+            "-c",
+            trust,
+            "-c",
+            "model_reasoning_effort=low",
+            "-s",
+            "danger-full-access",
+            "-C",
+            cwd,
+            prompt,
+        ],
+        cwd,
+    )
 
 
 def run_running() -> None:
@@ -280,15 +349,28 @@ def run_running() -> None:
     GET /runs?active=1 within 3 s, rows may change only when a run starts or ends or a minute rolls
     over, and a failing command must pin the spotlight row."""
     run = Run("running")
-    subprocess.run([sys.executable, str(ROOT / "scripts" / "devstack.py"), "reset"], check=True, capture_output=True,
-                   env={**os.environ, "DECK_STATE": str(STATE)})
+    subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "devstack.py"), "reset"],
+        check=True,
+        capture_output=True,
+        env={**os.environ, "DECK_STATE": str(STATE)},
+    )
     at_root(run)
     sleep = 'python -c "import time; time.sleep({})"'
     agents = [
-        claude(f"Run exactly one Bash command and nothing else: {sleep.format(70)} . Then reply with one word: done.", "C:/deck-sandbox/glasses"),
-        claude(f"Run these two Bash commands one after the other and nothing else: first {sleep.format(55)} , then "
-               "python -c \"import sys; sys.exit(1)\" (it fails on purpose; don't retry). Then reply with one word: done.", "C:/deck-sandbox/hub"),
-        codex(f"Run exactly one shell command and nothing else: {sleep.format(65)} . Then reply with one word: done.", "C:/deck-sandbox/hub"),
+        claude(
+            f"Run exactly one Bash command and nothing else: {sleep.format(70)} . Then reply with one word: done.",
+            "C:/deck-sandbox/glasses",
+        ),
+        claude(
+            f"Run these two Bash commands one after the other and nothing else: first {sleep.format(55)} , then "
+            'python -c "import sys; sys.exit(1)" (it fails on purpose; don\'t retry). Then reply with one word: done.',
+            "C:/deck-sandbox/hub",
+        ),
+        codex(
+            f"Run exactly one shell command and nothing else: {sleep.format(65)} . Then reply with one word: done.",
+            "C:/deck-sandbox/hub",
+        ),
     ]
     run.goto("running")
     run.do("click", r"page running:focus: depth 2", pause=0)
@@ -316,15 +398,24 @@ def run_running() -> None:
     for i, (t0, ids) in enumerate(relay_sets):
         lasted = (relay_sets[i + 1][0] if i + 1 < len(relay_sets) else time.time()) - t0
         if lasted >= 3 and not any(ids == shown and t0 - 0.5 <= t <= t0 + 3 for t, shown in plugin_sets):
-            if not any(ids == shown and t <= t0 and all(s2 == ids for t2, s2 in plugin_sets if t <= t2 <= t0 + 3) for t, shown in plugin_sets):
+            if not any(
+                ids == shown and t <= t0 and all(s2 == ids for t2, s2 in plugin_sets if t <= t2 <= t0 + 3)
+                for t, shown in plugin_sets
+            ):
                 run.failures.append(f"relay runs {sorted(ids)} at +{t0 - started:.1f}s not on the glasses within 3 s")
-    print(f"  ok    {len(relay_sets)} relay states, {len(plugin_sets)} glasses states, all matched within 3 s" if not run.failures else "  FAIL  mismatch")
+    print(
+        f"  ok    {len(relay_sets)} relay states, {len(plugin_sets)} glasses states, all matched within 3 s"
+        if not run.failures
+        else "  FAIL  mismatch"
+    )
     if rebuilds:
         run.failures.append(f"the Running page rebuilt while open: {rebuilds}")
     # Rows change only on start, end or a minute rolling over: at most one batch per state change
     # plus one per minute per run.
     budget = len(relay_sets) + 3 * 2 + 2
-    print(f"  {'ok  ' if len(upgrades) <= budget else 'FAIL'}  {len(upgrades)} row updates in {time.time() - started:.0f}s (budget {budget}), 0 rebuilds")
+    print(
+        f"  {'ok  ' if len(upgrades) <= budget else 'FAIL'}  {len(upgrades)} row updates in {time.time() - started:.0f}s (budget {budget}), 0 rebuilds"
+    )
     if len(upgrades) > budget:
         run.failures.append(f"{len(upgrades)} row updates > {budget}: {upgrades}")
     for a in agents:
@@ -376,7 +467,9 @@ def run_tick() -> None:
     time.sleep(5.2)
     ticks = [e["message"] for e in run.entries() if re.match(r"\[deck\] upgrade run:\S+ .*headline", e["message"])]
     rebuilds = [e["message"] for e in console() if e["id"] > run.seen and "rebuild" in e["message"]]
-    print(f"  {'ok  ' if 4 <= len(ticks) <= 6 and not rebuilds else 'FAIL'}  {len(ticks)} ELAPSED upgrades in 5.2 s, {len(rebuilds)} rebuilds")
+    print(
+        f"  {'ok  ' if 4 <= len(ticks) <= 6 and not rebuilds else 'FAIL'}  {len(ticks)} ELAPSED upgrades in 5.2 s, {len(rebuilds)} rebuilds"
+    )
     if not 4 <= len(ticks) <= 6 or rebuilds:
         run.failures.append(f"ELAPSED ticked {len(ticks)} times in 5.2 s with {len(rebuilds)} rebuilds")
     run.shot("0-run")
@@ -385,18 +478,32 @@ def run_tick() -> None:
 
 def gate_hook(cwd: str, command: str = "git push origin main") -> subprocess.Popen:
     """The real gate hook, as Claude Code runs it, on a PermissionRequest from a session in `cwd`."""
-    event = {"session_id": "focus-check", "hook_event_name": "PermissionRequest", "cwd": cwd, "tool_name": "Bash",
-             "tool_input": {"command": command}, "permission_mode": "default"}
-    proc = subprocess.Popen([sys.executable, "-I", str(ROOT / "hook" / "approval_gate_hook.py")], stdin=subprocess.PIPE,
-                            stdout=subprocess.PIPE, env={**os.environ, "APPROVAL_GATE_HOME": str(STATE)})
+    event = {
+        "session_id": "focus-check",
+        "hook_event_name": "PermissionRequest",
+        "cwd": cwd,
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+        "permission_mode": "default",
+    }
+    proc = subprocess.Popen(
+        [sys.executable, "-I", str(ROOT / "hook" / "approval_gate_hook.py")],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        env={**os.environ, "APPROVAL_GATE_HOME": str(STATE)},
+    )
     proc.stdin.write(json.dumps(event).encode())
     proc.stdin.close()
     return proc
 
 
 def ingest(agent: str, event: dict) -> None:
-    req = urllib.request.Request(f"http://127.0.0.1:8798/ingest?agent={agent}", data=json.dumps(event).encode(), method="POST",
-                                 headers={"Authorization": f"Bearer {(STATE / 'ingest.key').read_text().strip()}"})
+    req = urllib.request.Request(
+        f"http://127.0.0.1:8798/ingest?agent={agent}",
+        data=json.dumps(event).encode(),
+        method="POST",
+        headers={"Authorization": f"Bearer {(STATE / 'ingest.key').read_text().strip()}"},
+    )
     urllib.request.urlopen(req, timeout=5).read()
 
 
@@ -404,8 +511,12 @@ def run_focus() -> None:
     """Phase E: with focus on glasses, a git push from hub falls back to the terminal in under 0.5 s
     while a glasses prompt still reaches the simulator; the summary's counts match the event log."""
     run = Run("focus")
-    subprocess.run([sys.executable, str(ROOT / "scripts" / "devstack.py"), "reset"], check=True, capture_output=True,
-                   env={**os.environ, "DECK_STATE": str(STATE)})
+    subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "devstack.py"), "reset"],
+        check=True,
+        capture_output=True,
+        env={**os.environ, "DECK_STATE": str(STATE)},
+    )
     at_root(run)
     run.goto("projects")
     run.do("click", r"page projects:all: depth 2", pause=1.6)
@@ -431,8 +542,16 @@ def run_focus() -> None:
             run.failures.append(f"hub push: {took:.2f} s, output {out!r}")
         # A hub session waiting in its terminal shows only as a count on the Deck.
         for name in ("SessionStart", "UserPromptSubmit", "PermissionRequest"):
-            ingest("claude-code", {"hook_event_name": name, "session_id": "hub-out", "cwd": "C:\\deck-sandbox\\hub", "tool_name": "Write",
-                                   "tool_input": {"file_path": "C:\\deck-sandbox\\hub\\notes.md"}})
+            ingest(
+                "claude-code",
+                {
+                    "hook_event_name": name,
+                    "session_id": "hub-out",
+                    "cwd": "C:\\deck-sandbox\\hub",
+                    "tool_name": "Write",
+                    "tool_input": {"file_path": "C:\\deck-sandbox\\hub\\notes.md"},
+                },
+            )
         glasses = gate_hook("C:\\deck-sandbox\\glasses")
         run.expect(r"\[deck\] prompt req_\w+ over projects:all:")
         time.sleep(STEP)
@@ -458,15 +577,21 @@ def run_focus() -> None:
         run.shot("3-summary")
     finally:
         gate("disarm")
-    shown = json.loads(next(e["message"] for e in reversed(console()) if e["message"].startswith("[deck] focus summary")).split(" ", 3)[3])
+    shown = json.loads(
+        next(e["message"] for e in reversed(console()) if e["message"].startswith("[deck] focus summary")).split(
+            " ", 3
+        )[3]
+    )
     events = deck_get("/events?since=0")["events"]
     start = next(e for e in reversed(events) if e["type"] == "focus_start")
     end = next(e for e in reversed(events) if e["type"] == "focus_end")
     inside = [e for e in events if start["id"] < e["id"] < end["id"] and e.get("project") in start["projects"]]
-    counted = {"approved": sum(e["type"] == "approval" and e.get("status") == "approved" for e in inside),
-               "denied": sum(e["type"] == "approval" and e.get("status") == "denied" for e in inside),
-               "runs": sum(e["type"] == "run" and e.get("status") in ("ok", "failed") for e in inside),
-               "todos": sum(e["type"] == "todo" and e.get("status") == "done" for e in inside)}
+    counted = {
+        "approved": sum(e["type"] == "approval" and e.get("status") == "approved" for e in inside),
+        "denied": sum(e["type"] == "approval" and e.get("status") == "denied" for e in inside),
+        "runs": sum(e["type"] == "run" and e.get("status") in ("ok", "failed") for e in inside),
+        "todos": sum(e["type"] == "todo" and e.get("status") == "done" for e in inside),
+    }
     match = all(shown[k] == v for k, v in counted.items()) and end["summary"]["approved"] == shown["approved"] == 1
     print(f"  {'ok  ' if match else 'FAIL'}  summary {shown} matches the event log {counted}")
     if not match:
@@ -474,34 +599,99 @@ def run_focus() -> None:
     run.finish()
 
 
-TILES = ("[...document.querySelectorAll('#deck-view .tile')].map(t => [t.querySelector('.label').textContent,"
-         " t.querySelector('.value').textContent])")
+TILES = (
+    "[...document.querySelectorAll('#deck-view .tile')].map(t => [t.querySelector('.label').textContent,"
+    " t.querySelector('.value').textContent])"
+)
 
 
 def run_desktop() -> None:
     """Phase F: the desktop page and the glasses show the same counts within 3 s across a scripted
     run; Open on phone routes the phone page; /present follows the glasses."""
     run = Run("desktop")
-    subprocess.run([sys.executable, str(ROOT / "scripts" / "devstack.py"), "reset"], check=True, capture_output=True,
-                   env={**os.environ, "DECK_STATE": str(STATE)})
+    subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "devstack.py"), "reset"],
+        check=True,
+        capture_output=True,
+        env={**os.environ, "DECK_STATE": str(STATE)},
+    )
     at_root(run)
     samples = STATE / "desktop-samples.jsonl"
-    sampler = subprocess.Popen(["node", str(ROOT / "scripts" / "cdp.mjs"), "sample", "http://127.0.0.1:8799/", TILES, str(samples), "62"],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    sampler = subprocess.Popen(
+        ["node", str(ROOT / "scripts" / "cdp.mjs"), "sample", "http://127.0.0.1:8799/", TILES, str(samples), "62"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
     time.sleep(4)
     rec = "C:\\deck-sandbox\\glasses"
     steps = [  # each changes at least one count on the Deck
         ("claude-code", {"hook_event_name": "SessionStart", "session_id": "dsk-1", "cwd": rec}),
-        ("claude-code", {"hook_event_name": "PreToolUse", "session_id": "dsk-1", "cwd": rec, "tool_name": "Bash", "tool_use_id": "toolu_dsk_1",
-                         "tool_input": {"command": "npm test"}}),
-        ("claude-code", {"hook_event_name": "PreToolUse", "session_id": "dsk-1", "cwd": rec, "tool_name": "Bash", "tool_use_id": "toolu_dsk_2",
-                         "tool_input": {"command": "git push origin main"}}),
-        ("claude-code", {"hook_event_name": "PermissionRequest", "session_id": "dsk-1", "cwd": rec, "tool_name": "Bash",
-                         "tool_input": {"command": "git push origin main"}}),
-        ("codex", {"hook_event_name": "SessionStart", "session_id": "dsk-2", "cwd": "C:\\deck-sandbox\\hub", "model": "gpt"}),
-        ("claude-code", {"hook_event_name": "TaskCreated", "session_id": "dsk-1", "cwd": rec, "task_id": "9", "task_subject": "write the docs"}),
-        ("claude-code", {"hook_event_name": "PostToolUse", "session_id": "dsk-1", "cwd": rec, "tool_name": "Bash", "tool_use_id": "toolu_dsk_2"}),
-        ("claude-code", {"hook_event_name": "PostToolUse", "session_id": "dsk-1", "cwd": rec, "tool_name": "Bash", "tool_use_id": "toolu_dsk_1"}),
+        (
+            "claude-code",
+            {
+                "hook_event_name": "PreToolUse",
+                "session_id": "dsk-1",
+                "cwd": rec,
+                "tool_name": "Bash",
+                "tool_use_id": "toolu_dsk_1",
+                "tool_input": {"command": "npm test"},
+            },
+        ),
+        (
+            "claude-code",
+            {
+                "hook_event_name": "PreToolUse",
+                "session_id": "dsk-1",
+                "cwd": rec,
+                "tool_name": "Bash",
+                "tool_use_id": "toolu_dsk_2",
+                "tool_input": {"command": "git push origin main"},
+            },
+        ),
+        (
+            "claude-code",
+            {
+                "hook_event_name": "PermissionRequest",
+                "session_id": "dsk-1",
+                "cwd": rec,
+                "tool_name": "Bash",
+                "tool_input": {"command": "git push origin main"},
+            },
+        ),
+        (
+            "codex",
+            {"hook_event_name": "SessionStart", "session_id": "dsk-2", "cwd": "C:\\deck-sandbox\\hub", "model": "gpt"},
+        ),
+        (
+            "claude-code",
+            {
+                "hook_event_name": "TaskCreated",
+                "session_id": "dsk-1",
+                "cwd": rec,
+                "task_id": "9",
+                "task_subject": "write the docs",
+            },
+        ),
+        (
+            "claude-code",
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "dsk-1",
+                "cwd": rec,
+                "tool_name": "Bash",
+                "tool_use_id": "toolu_dsk_2",
+            },
+        ),
+        (
+            "claude-code",
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "dsk-1",
+                "cwd": rec,
+                "tool_name": "Bash",
+                "tool_use_id": "toolu_dsk_1",
+            },
+        ),
         ("codex", {"hook_event_name": "SessionEnd", "session_id": "dsk-2", "cwd": "C:\\deck-sandbox\\hub"}),
     ]
     relay_states, glasses_states = [], []
@@ -518,7 +708,9 @@ def run_desktop() -> None:
                 run.seen = e["id"]
                 if e["message"].startswith("[deck] counts "):
                     c = json.loads(e["message"].split(" ", 2)[2])
-                    glasses_states.append((time.time(), (c["needs"], c["sessions"], c["running"], c["projects"], c["todos"])))
+                    glasses_states.append(
+                        (time.time(), (c["needs"], c["sessions"], c["running"], c["projects"], c["todos"]))
+                    )
             time.sleep(0.25)
     sampler.wait(30)
     names = ("Needs you", "Sessions", "Running", "Projects", "To-dos")
@@ -539,7 +731,9 @@ def run_desktop() -> None:
         for name, states in (("glasses", glasses_states), ("desktop", desktop_states)):
             if not shown_within(states, t0, value):
                 run.failures.append(f"{name} never showed {value} within 3 s of +{t0 - started:.1f}s")
-    print(f"  {'ok  ' if not run.failures else 'FAIL'}  {len(relay_states)} relay states; glasses and desktop matched each within 3 s")
+    print(
+        f"  {'ok  ' if not run.failures else 'FAIL'}  {len(relay_states)} relay states; glasses and desktop matched each within 3 s"
+    )
 
     # Open on phone: a glasses menu routes the phone page, which shares the plugin's WebView.
     run.goto("sessions")
@@ -549,8 +743,19 @@ def run_desktop() -> None:
     time.sleep(1.5)
     urllib.request.urlretrieve("http://127.0.0.1:9898/api/screenshot/webview", str(SHOTS / "desktop-phone-route.png"))
     # /present follows the glasses: it now shows the Sessions page.
-    out = subprocess.run(["node", str(ROOT / "scripts" / "cdp.mjs"), "eval", "http://127.0.0.1:8799/present",
-                          "document.querySelector('#deck-view h1')?.textContent", "3500"], capture_output=True, text=True, timeout=60)
+    out = subprocess.run(
+        [
+            "node",
+            str(ROOT / "scripts" / "cdp.mjs"),
+            "eval",
+            "http://127.0.0.1:8799/present",
+            "document.querySelector('#deck-view h1')?.textContent",
+            "3500",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
     heading = json.loads(out.stdout or "null")
     print(f"  {'ok  ' if heading == 'Sessions' else 'FAIL'}  /present follows the glasses: {heading!r}")
     if heading != "Sessions":
@@ -605,7 +810,16 @@ def main() -> None:
         sys.exit(__doc__)
     cmd = sys.argv[1]
     if cmd == "run":
-        scenarios = {"walk": run_walk, "interrupt": run_interrupt, "running": run_running, "since": run_since, "tick": run_tick, "todo": run_todo, "focus": run_focus, "desktop": run_desktop}
+        scenarios = {
+            "walk": run_walk,
+            "interrupt": run_interrupt,
+            "running": run_running,
+            "since": run_since,
+            "tick": run_tick,
+            "todo": run_todo,
+            "focus": run_focus,
+            "desktop": run_desktop,
+        }
         if len(sys.argv) < 3 or sys.argv[2] not in scenarios:
             sys.exit(f"run one of: {', '.join(scenarios)}")
         return scenarios[sys.argv[2]]()

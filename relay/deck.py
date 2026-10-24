@@ -5,6 +5,7 @@ here has been scrubbed: absolute paths become project-relative (or just a file n
 directory never appears, secret-shaped strings become [secret]. Prompts, assistant messages and
 tool output are read only to be dropped. Stdlib only. Contract: contract.md, "Contract v2".
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -36,7 +37,22 @@ CARD_TTL, CARD_TTL_MAX = 1800, 86400
 CARD_LEVELS = ("info", "warn", "error")
 SUBAGENT_TOOLS = ("Agent", "Task", "spawn_agent")
 SAFE_ID = re.compile(r"[\w.:-]{1,100}")
-VIEWS = ("deck", "needs", "sessions", "running", "projects", "project", "todos", "focus", "session", "run", "todo", "commits", "card", "error")
+VIEWS = (
+    "deck",
+    "needs",
+    "sessions",
+    "running",
+    "projects",
+    "project",
+    "todos",
+    "focus",
+    "session",
+    "run",
+    "todo",
+    "commits",
+    "card",
+    "error",
+)
 
 _P = r"""[^\s'"`;|&<>(),]"""
 PATH_TOKEN = re.compile(
@@ -45,11 +61,16 @@ PATH_TOKEN = re.compile(
     rf"|(?<![\w/\\.:-])/[A-Za-z]/{_P}*"
     rf"|(?<![\w/\\.:-])/(?:home|Users|tmp|var|mnt|opt|etc|usr|private|root|srv|Volumes)/{_P}*"
     rf"|(?<![\w/\\.~-])~[\\/]{_P}*"
-    rf"|(?:\$HOME|\$\{{HOME\}}|\$env:USERPROFILE|%USERPROFILE%)(?:[\\/]{_P}*)?", re.I)
+    rf"|(?:\$HOME|\$\{{HOME\}}|\$env:USERPROFILE|%USERPROFILE%)(?:[\\/]{_P}*)?",
+    re.I,
+)
 HOME_TOKEN = re.compile(r"^(?:~|\$HOME|\$\{HOME\}|\$env:USERPROFILE|%USERPROFILE%)", re.I)
 SECRETS = [  # the same shapes the gate hook redacts
     (r"\bsk-(ant-)?[A-Za-z0-9_-]{16,}", "[secret]"),
-    (r"\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|AKIA[0-9A-Z]{16}|xox[abpr]-[A-Za-z0-9-]{10,}|AIza[\w-]{30,})", "[secret]"),
+    (
+        r"\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|AKIA[0-9A-Z]{16}|xox[abpr]-[A-Za-z0-9-]{10,}|AIza[\w-]{30,})",
+        "[secret]",
+    ),
     (r"\b(agt_|dik_|eyJ)[\w-]{10,}(\.[\w-]{10,}\.[\w-]+)?", "[secret]"),
     (r"(?i)\b(\w*(token|secret|passw(or)?d|api_?key|auth)\w*)\s*=\s*('[^']*'|\"[^\"]*\"|\S+)", r"\1=[secret]"),
     (r"(?i)(authorization:\s*(bearer|basic|token)\s+)[^\s'\"]+", r"\1[secret]"),
@@ -64,7 +85,7 @@ def iso(t: float) -> str:
 
 
 def clip(text: str, limit: int) -> str:
-    return text if len(text) <= limit else text[:limit - 1] + "…"
+    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def visible(text: str) -> str:
@@ -100,7 +121,7 @@ class Scrubber:
 
     def path(self, path: str, place: Placement) -> str:
         if m := HOME_TOKEN.match(path):
-            path = self.home + "/" + path[m.end():].lstrip("\\/")
+            path = self.home + "/" + path[m.end() :].lstrip("\\/")
         return self.projects.display(norm(path), place.base, place.project)
 
     def text(self, text: str, place: Placement, limit: int = TARGET_MAX) -> str:
@@ -238,7 +259,9 @@ class Deck:
             self.ingest_errors += 1
             if self.now() - self._err_logged >= 10:
                 self._err_logged = self.now()
-                self._write({"ts": iso(self.now()), "type": "ingest_error", "reason": reason[:80], "count": self.ingest_errors})
+                self._write(
+                    {"ts": iso(self.now()), "type": "ingest_error", "reason": reason[:80], "count": self.ingest_errors}
+                )
 
     # ---- ingest -------------------------------------------------------------------
 
@@ -265,10 +288,23 @@ class Deck:
         if sess is None or (sess["state"] == "ended" and event.get("hook_event_name") == "SessionStart"):
             place = self.projects.place(cwd or "")
             t = self.now()
-            sess = {"id": sess_id, "agent": agent, "title": "", "project": place.project, "folder": place.folder,
-                    "tag": place.tag, "model": "", "state": "idle", "waiting_for": None, "started_at": iso(t),
-                    "last_event_at": iso(t), "current": None,
-                    "counts": {"tools": 0, "approved": 0, "denied": 0, "failed": 0}, "error": False, "muted": False}
+            sess = {
+                "id": sess_id,
+                "agent": agent,
+                "title": "",
+                "project": place.project,
+                "folder": place.folder,
+                "tag": place.tag,
+                "model": "",
+                "state": "idle",
+                "waiting_for": None,
+                "started_at": iso(t),
+                "last_event_at": iso(t),
+                "current": None,
+                "counts": {"tools": 0, "approved": 0, "denied": 0, "failed": 0},
+                "error": False,
+                "muted": False,
+            }
             self.sessions[sess_id] = sess
             self.sp[sess_id] = {"place": place, "state_t": t, "perm_t": 0.0, "last_t": t, "cwd": cwd}
             self.emit("session", session=sess_id, agent=agent, project=place.project, state="idle", waiting_for=None)
@@ -286,7 +322,14 @@ class Deck:
             return
         sess["state"], sess["waiting_for"] = state, waiting_for
         self.sp[sess["id"]]["state_t"] = self.now()
-        self.emit("session", session=sess["id"], agent=sess["agent"], project=sess["project"], state=state, waiting_for=waiting_for)
+        self.emit(
+            "session",
+            session=sess["id"],
+            agent=sess["agent"],
+            project=sess["project"],
+            state=state,
+            waiting_for=waiting_for,
+        )
 
     def _settle(self, sess: dict) -> None:
         """After a run ends: still waiting if another run of this session waits, else working."""
@@ -328,14 +371,35 @@ class Deck:
         self._settle(sess)
 
     def _open(self, sess, rid, kind, tool, target, t, parent=None) -> dict:
-        run = {"id": rid, "session": sess["id"], "agent": sess["agent"], "project": sess["project"], "kind": kind,
-               "tool": tool, "target": target, "started_at": iso(t), "ended_at": None, "status": "running",
-               "parent": parent, "_t": t, "_end": None}
+        run = {
+            "id": rid,
+            "session": sess["id"],
+            "agent": sess["agent"],
+            "project": sess["project"],
+            "kind": kind,
+            "tool": tool,
+            "target": target,
+            "started_at": iso(t),
+            "ended_at": None,
+            "status": "running",
+            "parent": parent,
+            "_t": t,
+            "_end": None,
+        }
         self.runs[rid] = run
         sess["counts"]["tools"] += kind == "tool"
         sess["current"] = {"tool": tool, "target": target, "since": iso(t), "run": rid}
-        self.emit("run", run=rid, session=sess["id"], agent=sess["agent"], project=sess["project"], kind=kind,
-                  tool=tool, target=target, status="running")
+        self.emit(
+            "run",
+            run=rid,
+            session=sess["id"],
+            agent=sess["agent"],
+            project=sess["project"],
+            kind=kind,
+            tool=tool,
+            target=target,
+            status="running",
+        )
         return run
 
     def _close(self, run: dict, status: str, t: float | None = None) -> None:
@@ -346,8 +410,18 @@ class Deck:
         self.closed_ids[run["id"]] = None
         while len(self.closed_ids) > MAX_RUNS:
             self.closed_ids.popitem(last=False)
-        self.emit("run", run=run["id"], session=run["session"], agent=run["agent"], project=run["project"],
-                  kind=run["kind"], tool=run["tool"], target=run["target"], status=status, elapsed_s=int(t - run["_t"]))
+        self.emit(
+            "run",
+            run=run["id"],
+            session=run["session"],
+            agent=run["agent"],
+            project=run["project"],
+            kind=run["kind"],
+            tool=run["tool"],
+            target=run["target"],
+            status=status,
+            elapsed_s=int(t - run["_t"]),
+        )
 
     def _subagent_run(self, sess, agent_id) -> str | None:
         aid = safe_id(agent_id, "a")
@@ -390,9 +464,18 @@ class Deck:
     def _failure(self, sess, run, detail: str) -> None:
         sess["counts"]["failed"] += 1
         sess["error"] = True
-        error = {"id": self._error_id(), "session": sess["id"], "agent": sess["agent"], "project": sess["project"],
-                 "tool": run["tool"] if run else "", "target": run["target"] if run else "", "run": run["id"] if run else None,
-                 "kind": "tool", "detail": detail, "at": iso(self.now())}
+        error = {
+            "id": self._error_id(),
+            "session": sess["id"],
+            "agent": sess["agent"],
+            "project": sess["project"],
+            "tool": run["tool"] if run else "",
+            "target": run["target"] if run else "",
+            "run": run["id"] if run else None,
+            "kind": "tool",
+            "detail": detail,
+            "at": iso(self.now()),
+        }
         self.errors.appendleft(error)
         self.emit("error", **self._error_fields(error))
 
@@ -407,8 +490,14 @@ class Deck:
     def _on_PermissionRequest(self, sess, event, t):
         tool = clip(visible(str(event.get("tool_name") or "tool")), 40)
         target = self.scrub.target(tool, event.get("tool_input"), self.sp[sess["id"]]["place"])
-        run = next((r for r in reversed(self.runs.values())
-                    if r["session"] == sess["id"] and r["status"] == "running" and r["tool"] == tool), None)
+        run = next(
+            (
+                r
+                for r in reversed(self.runs.values())
+                if r["session"] == sess["id"] and r["status"] == "running" and r["tool"] == tool
+            ),
+            None,
+        )
         if run is None:
             run = self._open(sess, f"perm_{self.seq + 1}", "tool", tool, target, t)
             run["_ctx"] = safe_id(event.get("agent_id"), "a")
@@ -417,7 +506,12 @@ class Deck:
         self.sp[sess["id"]]["perm_t"] = t
         self._state(sess, "waiting", "approval")
         for rid, g in self.gate.items():  # the gate's own request may have arrived first
-            if g["session"] is None and g["agent"] == sess["agent"] and g["project"] == sess["project"] and t - g["t"] < LINK_WINDOW:
+            if (
+                g["session"] is None
+                and g["agent"] == sess["agent"]
+                and g["project"] == sess["project"]
+                and t - g["t"] < LINK_WINDOW
+            ):
                 g["session"] = sess["id"]
                 break
 
@@ -438,8 +532,17 @@ class Deck:
     def _on_SubagentStart(self, sess, event, t):
         aid = safe_id(event.get("agent_id"), "a")
         kind = clip(visible(str(event.get("agent_type") or "agent")), 32)
-        run = next((r for r in reversed(self.runs.values()) if r["session"] == sess["id"] and r["status"] == "running"
-                    and r["tool"] in SUBAGENT_TOOLS and not r.get("_agent")), None)
+        run = next(
+            (
+                r
+                for r in reversed(self.runs.values())
+                if r["session"] == sess["id"]
+                and r["status"] == "running"
+                and r["tool"] in SUBAGENT_TOOLS
+                and not r.get("_agent")
+            ),
+            None,
+        )
         if run is None:
             run = self._open(sess, f"agent:{aid}", "subagent", kind, kind, t)
         run.update(kind="subagent", _agent=aid)
@@ -464,11 +567,24 @@ class Deck:
         key = "task_" + hashlib.sha1(f"{sess['id']}\0{tid}".encode()).hexdigest()[:16]
         text = self.scrub.text(str(event.get("task_subject") or "task"), self.sp[sess["id"]]["place"], TARGET_MAX)
         known = self.tasks.get(key)
-        self.tasks[key] = {"id": key, "project": sess["project"], "text": text, "source": "claude-task",
-                           "file": None, "done": done, "session": sess["id"]}
+        self.tasks[key] = {
+            "id": key,
+            "project": sess["project"],
+            "text": text,
+            "source": "claude-task",
+            "file": None,
+            "done": done,
+            "session": sess["id"],
+        }
         if not known or known["done"] != done:
-            self.emit("todo", todo=key, project=sess["project"], text=text, source="claude-task",
-                      status="done" if done else "added")
+            self.emit(
+                "todo",
+                todo=key,
+                project=sess["project"],
+                text=text,
+                source="claude-task",
+                status="done" if done else "added",
+            )
 
     def _on_Stop(self, sess, event, t, failed: str | None = None):
         for run in list(self.runs.values()):
@@ -477,14 +593,28 @@ class Deck:
         sess["current"] = None
         if failed:
             sess["error"] = True
-            error = {"id": self._error_id(), "session": sess["id"], "agent": sess["agent"], "project": sess["project"],
-                     "tool": "", "target": "", "run": None, "kind": "stop", "detail": failed, "at": iso(t)}
+            error = {
+                "id": self._error_id(),
+                "session": sess["id"],
+                "agent": sess["agent"],
+                "project": sess["project"],
+                "tool": "",
+                "target": "",
+                "run": None,
+                "kind": "stop",
+                "detail": failed,
+                "at": iso(t),
+            }
             self.errors.appendleft(error)
             self.emit("error", **self._error_fields(error))
         self._state(sess, "idle")
 
     def _on_StopFailure(self, sess, event, t):
-        kind = event.get("error") if isinstance(event.get("error"), str) and re.fullmatch(r"[a-z_]{1,32}", event["error"]) else "unknown"
+        kind = (
+            event.get("error")
+            if isinstance(event.get("error"), str) and re.fullmatch(r"[a-z_]{1,32}", event["error"])
+            else "unknown"
+        )
         self._on_Stop(sess, event, t, failed=kind)
 
     def _on_Interrupt(self, sess, event, t):
@@ -513,8 +643,15 @@ class Deck:
                 return None
             if sess["muted"] != muted:
                 sess["muted"] = muted
-                self.emit("session", session=sid, agent=sess["agent"], project=sess["project"], state=sess["state"],
-                          waiting_for=sess["waiting_for"], muted=muted)
+                self.emit(
+                    "session",
+                    session=sid,
+                    agent=sess["agent"],
+                    project=sess["project"],
+                    state=sess["state"],
+                    waiting_for=sess["waiting_for"],
+                    muted=muted,
+                )
             return self.public_session(sess)
 
     # ---- cards --------------------------------------------------------------------
@@ -532,12 +669,20 @@ class Deck:
                 return self.log_error("card without a title")
             project = body.get("project") if body.get("project") in self.projects.projects else OTHER
             place = Placement(project, self.projects.projects[project].root if project != OTHER else "", project)
-            ttl = body.get("ttl") if isinstance(body.get("ttl"), int) and 60 <= body["ttl"] <= CARD_TTL_MAX else CARD_TTL
+            ttl = (
+                body.get("ttl") if isinstance(body.get("ttl"), int) and 60 <= body["ttl"] <= CARD_TTL_MAX else CARD_TTL
+            )
             cid = cid or f"card_{self.seq + 1}"
             t = self.now()
-            card = {"id": cid, "title": self.scrub.text(title, place, TARGET_MAX), "project": project,
-                    "level": body.get("level") if body.get("level") in CARD_LEVELS else "info",
-                    "at": iso(t), "_t": t, "_until": t + ttl}
+            card = {
+                "id": cid,
+                "title": self.scrub.text(title, place, TARGET_MAX),
+                "project": project,
+                "level": body.get("level") if body.get("level") in CARD_LEVELS else "info",
+                "at": iso(t),
+                "_t": t,
+                "_until": t + ttl,
+            }
             self.cards[cid] = card
             self.emit("card", card=cid, title=card["title"], project=project, level=card["level"], status="posted")
 
@@ -563,8 +708,12 @@ class Deck:
         t, best = self.now(), None
         for sid, sess in self.sessions.items():
             p = self.sp[sid]
-            if (sess["agent"] == agent and sess["project"] == project and sess["state"] == "waiting"
-                    and t - p["perm_t"] < LINK_WINDOW):
+            if (
+                sess["agent"] == agent
+                and sess["project"] == project
+                and sess["state"] == "waiting"
+                and t - p["perm_t"] < LINK_WINDOW
+            ):
                 score = (sess["current"] is not None and sess["current"]["tool"] == tool, p["perm_t"])
                 if best is None or score > best[0]:
                     best = (score, sid)
@@ -575,10 +724,25 @@ class Deck:
             s = req["session"]
             project = self._gate_project(s.get("cwd", ""))
             link = self._link(s.get("agent", ""), project, req["tool"])
-            self.gate[req["id"]] = {"agent": s.get("agent"), "project": project, "tool": req["tool"],
-                                    "summary": req["summary"], "risk": req["risk"], "session": link, "t": self.now()}
-            self.emit("approval", request=req["id"], session=link, agent=s.get("agent"), project=project,
-                      tool=req["tool"], summary=self._gate_summary(req, project), status="pending")
+            self.gate[req["id"]] = {
+                "agent": s.get("agent"),
+                "project": project,
+                "tool": req["tool"],
+                "summary": req["summary"],
+                "risk": req["risk"],
+                "session": link,
+                "t": self.now(),
+            }
+            self.emit(
+                "approval",
+                request=req["id"],
+                session=link,
+                agent=s.get("agent"),
+                project=project,
+                tool=req["tool"],
+                summary=self._gate_summary(req, project),
+                status="pending",
+            )
 
     def _gate_summary(self, req: dict, project: str) -> str:
         root = self.projects.projects[project].root if project in self.projects.projects else ""
@@ -599,9 +763,17 @@ class Deck:
                             self._close(run, "denied")
                             break
                     self._settle(sess)
-            self.emit("approval", request=req["id"], session=g["session"], agent=g["agent"], project=g["project"],
-                      tool=g["tool"], summary=self._gate_summary(req, g["project"]), status=status,
-                      **({"by": req["decided_by"]} if req.get("decided_by") else {}))
+            self.emit(
+                "approval",
+                request=req["id"],
+                session=g["session"],
+                agent=g["agent"],
+                project=g["project"],
+                tool=g["tool"],
+                summary=self._gate_summary(req, g["project"]),
+                status=status,
+                **({"by": req["decided_by"]} if req.get("decided_by") else {}),
+            )
 
     def gate_refused(self, body: dict, reason: str) -> None:
         """A request that went straight to the terminal: nobody watching, outside focus, or muted."""
@@ -612,9 +784,17 @@ class Deck:
             link = self._link(agent or "", project, str(body.get("tool")))
             summary = body.get("summary") if isinstance(body.get("summary"), str) else ""
             root = self.projects.projects[project].root if project in self.projects.projects else ""
-            self.emit("approval", request=None, session=link, agent=agent, project=project,
-                      tool=clip(str(body.get("tool")), 40), summary=self.scrub.text(summary, Placement(project, root, project)),
-                      status="refused", reason=reason)
+            self.emit(
+                "approval",
+                request=None,
+                session=link,
+                agent=agent,
+                project=project,
+                tool=clip(str(body.get("tool")), 40),
+                summary=self.scrub.text(summary, Placement(project, root, project)),
+                status="refused",
+                reason=reason,
+            )
 
     # ---- focus --------------------------------------------------------------------
 
@@ -645,8 +825,15 @@ class Deck:
             if self.focus:
                 self.end_focus("replaced")
             t = self.now()
-            self.focus = {"projects": projects, "minutes": minutes, "started_at": iso(t), "ends_at": iso(t + minutes * 60) if minutes else None,
-                          "_t": t, "_until": t + minutes * 60 if minutes else None, "_seq": self.seq}
+            self.focus = {
+                "projects": projects,
+                "minutes": minutes,
+                "started_at": iso(t),
+                "ends_at": iso(t + minutes * 60) if minutes else None,
+                "_t": t,
+                "_until": t + minutes * 60 if minutes else None,
+                "_seq": self.seq,
+            }
             self._save_focus()
             self.emit("focus_start", projects=projects, minutes=minutes, ends_at=self.focus["ends_at"])
             return self.public_focus()
@@ -658,7 +845,12 @@ class Deck:
             focus, self.focus = self.focus, None
             self._save_focus()
             summary = self.summarize(focus)
-            self.last_summary = {**summary, "reason": reason, "projects": focus["projects"], "ended_at": iso(self.now())}
+            self.last_summary = {
+                **summary,
+                "reason": reason,
+                "projects": focus["projects"],
+                "ended_at": iso(self.now()),
+            }
             self.emit("focus_end", reason=reason, projects=focus["projects"], summary=summary)
             return self.last_summary
 
@@ -682,7 +874,13 @@ class Deck:
         if not f:
             return None
         left = max(0, int(f["_until"] - self.now())) if f.get("_until") else None
-        return {"projects": f["projects"], "minutes": f["minutes"], "started_at": f["started_at"], "ends_at": f["ends_at"], "left_s": left}
+        return {
+            "projects": f["projects"],
+            "minutes": f["minutes"],
+            "started_at": f["started_at"],
+            "ends_at": f["ends_at"],
+            "left_s": left,
+        }
 
     # ---- upkeep ---------------------------------------------------------------------
 
@@ -736,8 +934,11 @@ class Deck:
         return project != OTHER or self.projects.unmapped != "hide"
 
     def public_session(self, sess: dict) -> dict:
-        return {**sess, "project_name": self.projects.name(sess["project"]),
-                "state_for_s": int(self.now() - self.sp[sess["id"]]["state_t"])}
+        return {
+            **sess,
+            "project_name": self.projects.name(sess["project"]),
+            "state_for_s": int(self.now() - self.sp[sess["id"]]["state_t"]),
+        }
 
     def public_run(self, run: dict) -> dict:
         end = run["_end"] if run["_end"] is not None else self.now()
@@ -747,8 +948,17 @@ class Deck:
     def session_list(self, scope: str) -> list[dict]:
         order = {"waiting": 0, "working": 1, "idle": 2, "quiet": 3, "ended": 4}
         with self.cond:
-            rows = [s for s in self.sessions.values() if self.in_scope(s["project"], scope) and self.visible_project(s["project"])]
-            rows.sort(key=lambda s: (order[s["state"]], self.sp[s["id"]]["state_t"] if s["state"] == "waiting" else -self.sp[s["id"]]["last_t"]))
+            rows = [
+                s
+                for s in self.sessions.values()
+                if self.in_scope(s["project"], scope) and self.visible_project(s["project"])
+            ]
+            rows.sort(
+                key=lambda s: (
+                    order[s["state"]],
+                    self.sp[s["id"]]["state_t"] if s["state"] == "waiting" else -self.sp[s["id"]]["last_t"],
+                )
+            )
             return [self.public_session(s) for s in rows]
 
     def session_detail(self, sid: str) -> dict | None:
@@ -762,9 +972,14 @@ class Deck:
 
     def run_list(self, scope: str, active: bool) -> list[dict]:
         with self.cond:
-            rows = [r for r in self.runs.values() if self.in_scope(r["project"], scope) and self.visible_project(r["project"])
-                    and (not active or r["status"] in ("running", "waiting"))
-                    and not self.sessions.get(r["session"], {}).get("muted")]
+            rows = [
+                r
+                for r in self.runs.values()
+                if self.in_scope(r["project"], scope)
+                and self.visible_project(r["project"])
+                and (not active or r["status"] in ("running", "waiting"))
+                and not self.sessions.get(r["session"], {}).get("muted")
+            ]
             rows.sort(key=lambda r: r["_t"])
             return [self.public_run(r) for r in rows]
 
@@ -779,24 +994,64 @@ class Deck:
             t, items, covered = self.now(), [], set()
             for rid, g in self.gate.items():
                 if self.in_scope(g["project"], scope):
-                    items.append({"kind": "approval", "id": rid, "session": g["session"], "agent": g["agent"], "project": g["project"],
-                                  "project_name": self.projects.name(g["project"]), "tool": g["tool"],
-                                  "title": self._gate_summary({"summary": g["summary"]}, g["project"]), "risk": g["risk"],
-                                  "for_s": int(t - g["t"])})
+                    items.append(
+                        {
+                            "kind": "approval",
+                            "id": rid,
+                            "session": g["session"],
+                            "agent": g["agent"],
+                            "project": g["project"],
+                            "project_name": self.projects.name(g["project"]),
+                            "tool": g["tool"],
+                            "title": self._gate_summary({"summary": g["summary"]}, g["project"]),
+                            "risk": g["risk"],
+                            "for_s": int(t - g["t"]),
+                        }
+                    )
                     covered.add(g["session"])
-            waiting = [s for s in self.sessions.values() if s["state"] == "waiting" and s["id"] not in covered and not s["muted"]
-                       and self.in_scope(s["project"], scope) and self.visible_project(s["project"])]
+            waiting = [
+                s
+                for s in self.sessions.values()
+                if s["state"] == "waiting"
+                and s["id"] not in covered
+                and not s["muted"]
+                and self.in_scope(s["project"], scope)
+                and self.visible_project(s["project"])
+            ]
             for s in sorted(waiting, key=lambda s: self.sp[s["id"]]["state_t"]):
                 cur = s["current"] or {}
-                items.append({"kind": "session", "id": s["id"], "session": s["id"], "agent": s["agent"], "project": s["project"],
-                              "project_name": self.projects.name(s["project"]), "tool": cur.get("tool", "") if s["waiting_for"] == "approval" else "",
-                              "title": (cur.get("target") or cur.get("tool") or "") if s["waiting_for"] == "approval" else "waiting for input",
-                              "waiting_for": s["waiting_for"], "for_s": int(t - self.sp[s["id"]]["state_t"])})
+                items.append(
+                    {
+                        "kind": "session",
+                        "id": s["id"],
+                        "session": s["id"],
+                        "agent": s["agent"],
+                        "project": s["project"],
+                        "project_name": self.projects.name(s["project"]),
+                        "tool": cur.get("tool", "") if s["waiting_for"] == "approval" else "",
+                        "title": (cur.get("target") or cur.get("tool") or "")
+                        if s["waiting_for"] == "approval"
+                        else "waiting for input",
+                        "waiting_for": s["waiting_for"],
+                        "for_s": int(t - self.sp[s["id"]]["state_t"]),
+                    }
+                )
             cards = [c for c in self.cards.values() if self.in_scope(c["project"], scope)]
             for c in sorted(cards, key=lambda c: (level[c["level"]], c["at"])):
-                items.append({"kind": "card", "id": c["id"], "session": None, "agent": None, "project": c["project"],
-                              "project_name": self.projects.name(c["project"]), "tool": "", "title": c["title"],
-                              "level": c["level"], "for_s": int(t - c["_t"])})
+                items.append(
+                    {
+                        "kind": "card",
+                        "id": c["id"],
+                        "session": None,
+                        "agent": None,
+                        "project": c["project"],
+                        "project_name": self.projects.name(c["project"]),
+                        "tool": "",
+                        "title": c["title"],
+                        "level": c["level"],
+                        "for_s": int(t - c["_t"]),
+                    }
+                )
             return items
 
     def todo_list(self, scope: str, include_done: bool = False) -> list[dict]:
@@ -805,8 +1060,13 @@ class Deck:
             if self.in_scope(pid, scope):
                 out += [t for t in self._file_todos(pid) if include_done or not t["done"]]
         with self.cond:
-            out += [{k: v for k, v in t.items() if k != "session"} for t in self.tasks.values()
-                    if self.in_scope(t["project"], scope) and self.visible_project(t["project"]) and (include_done or not t["done"])]
+            out += [
+                {k: v for k, v in t.items() if k != "session"}
+                for t in self.tasks.values()
+                if self.in_scope(t["project"], scope)
+                and self.visible_project(t["project"])
+                and (include_done or not t["done"])
+            ]
         for t in out:
             t["project_name"] = self.projects.name(t["project"])
         return out
@@ -834,7 +1094,14 @@ class Deck:
             todo = next((t for t in self._file_todos(pid) if t["id"] == todo_id and not t["done"]), None)
             if todo and self.projects.mark_done(pid, todo_id) == "done":
                 self._todo_cache.pop(pid, None)
-                self.emit("todo", todo=todo_id, project=pid, text=todo["text"][:TARGET_MAX], source=todo["source"], status="done")
+                self.emit(
+                    "todo",
+                    todo=todo_id,
+                    project=pid,
+                    text=todo["text"][:TARGET_MAX],
+                    source=todo["source"],
+                    status="done",
+                )
                 return {**todo, "done": True, "project_name": self.projects.name(pid)}
         return None
 
@@ -855,12 +1122,24 @@ class Deck:
 
     def _project(self, pid: str, git: dict | None) -> dict:
         sessions = [s for s in self.sessions.values() if s["project"] == pid]
-        return {"id": pid, "name": self.projects.name(pid), "branch": (git or {}).get("branch", ""),
-                "dirty": (git or {}).get("dirty", 0), "pinned": bool(self.focus and pid in self.focus["projects"]),
-                "counts": {"sessions": sum(s["state"] != "ended" for s in sessions),
-                           "running": sum(r["project"] == pid and r["status"] in ("running", "waiting") for r in self.runs.values()),
-                           "waiting": sum(s["state"] == "waiting" for s in sessions) + sum(g["project"] == pid and g["session"] is None for g in self.gate.values()),
-                           "todos_open": len(self.todo_list(pid)) if pid != OTHER else sum(not t["done"] and t["project"] == pid for t in self.tasks.values())}}
+        return {
+            "id": pid,
+            "name": self.projects.name(pid),
+            "branch": (git or {}).get("branch", ""),
+            "dirty": (git or {}).get("dirty", 0),
+            "pinned": bool(self.focus and pid in self.focus["projects"]),
+            "counts": {
+                "sessions": sum(s["state"] != "ended" for s in sessions),
+                "running": sum(
+                    r["project"] == pid and r["status"] in ("running", "waiting") for r in self.runs.values()
+                ),
+                "waiting": sum(s["state"] == "waiting" for s in sessions)
+                + sum(g["project"] == pid and g["session"] is None for g in self.gate.values()),
+                "todos_open": len(self.todo_list(pid))
+                if pid != OTHER
+                else sum(not t["done"] and t["project"] == pid for t in self.tasks.values()),
+            },
+        }
 
     def deck(self, scope: str) -> dict:
         """The root screen's counts."""
@@ -870,14 +1149,35 @@ class Deck:
         with self.cond:
             outside = None
             if self.focus and scope == "focus":
-                rest = [s for s in self.sessions.values() if not self.in_scope(s["project"], "focus") and s["state"] != "ended"
-                        and self.visible_project(s["project"])]
-                outside = {"active": len(rest), "waiting": sum(s["state"] == "waiting" for s in rest)
-                           + sum(not self.in_scope(g["project"], "focus") for g in self.gate.values())}
+                rest = [
+                    s
+                    for s in self.sessions.values()
+                    if not self.in_scope(s["project"], "focus")
+                    and s["state"] != "ended"
+                    and self.visible_project(s["project"])
+                ]
+                outside = {
+                    "active": len(rest),
+                    "waiting": sum(s["state"] == "waiting" for s in rest)
+                    + sum(not self.in_scope(g["project"], "focus") for g in self.gate.values()),
+                }
             errors = [e for e in self.errors if self.in_scope(e["project"], scope)]
-            return {"scope": scope, "needs_you": len(needs), "sessions": sum(s["state"] != "ended" for s in sessions),
-                    "waiting": sum(s["state"] == "waiting" for s in sessions), "running": len(runs),
-                    "longest_s": max((r["elapsed_s"] for r in runs), default=0),
-                    "projects": len(self.projects.projects) + (1 if self.projects.unmapped != "hide" and any(s["project"] == OTHER for s in self.sessions.values()) else 0),
-                    "todos_open": len(self.todo_list(scope)), "focus": self.public_focus(), "outside_focus": outside,
-                    "errors": errors[:5], "cursor": self.seq}
+            return {
+                "scope": scope,
+                "needs_you": len(needs),
+                "sessions": sum(s["state"] != "ended" for s in sessions),
+                "waiting": sum(s["state"] == "waiting" for s in sessions),
+                "running": len(runs),
+                "longest_s": max((r["elapsed_s"] for r in runs), default=0),
+                "projects": len(self.projects.projects)
+                + (
+                    1
+                    if self.projects.unmapped != "hide" and any(s["project"] == OTHER for s in self.sessions.values())
+                    else 0
+                ),
+                "todos_open": len(self.todo_list(scope)),
+                "focus": self.public_focus(),
+                "outside_focus": outside,
+                "errors": errors[:5],
+                "cursor": self.seq,
+            }

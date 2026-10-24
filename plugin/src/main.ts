@@ -4,8 +4,16 @@ import { DeckClient, type DeckCounts, type FocusSummary } from './deck-api.ts'
 import { createGestures } from './gestures.ts'
 import { Glasses, type Paint } from './glasses.ts'
 import {
-  barText, rowText, screenFor, VISIBLE_ROWS, windowFor,
-  type Action, type Data, type Menu, type Page, type Screen,
+  barText,
+  rowText,
+  screenFor,
+  VISIBLE_ROWS,
+  windowFor,
+  type Action,
+  type Data,
+  type Menu,
+  type Page,
+  type Screen,
 } from './screens.ts'
 import { mountPhone, type Frame } from './phone.ts'
 import { bar, columns, fit } from './text.ts'
@@ -45,7 +53,7 @@ async function load(key: string): Promise<string> {
   } catch {
     return localStorage.getItem(key) ?? ''
   }
-  return value || (MIRRORED(key) ? localStorage.getItem(key) ?? '' : '')
+  return value || (MIRRORED(key) ? (localStorage.getItem(key) ?? '') : '')
 }
 
 async function store(key: string, value: string): Promise<void> {
@@ -131,10 +139,21 @@ const clock = () => new Date().toTimeString().slice(0, 5)
 
 function dataFor(page: Page): Data {
   const own = cache.get(pageKey(page))
-  const spotlight = page.kind === 'deck' ? (own?.deck ?? rootDeck)?.errors.find(e => !seenErrors.includes(e.error ?? e.id ?? '')) : undefined
-  const spotId = spotlight ? spotlight.error ?? spotlight.id : undefined
+  const spotlight =
+    page.kind === 'deck'
+      ? (own?.deck ?? rootDeck)?.errors.find(e => !seenErrors.includes(e.error ?? e.id ?? ''))
+      : undefined
+  const spotId = spotlight ? (spotlight.error ?? spotlight.id) : undefined
   if (spotlight && spotId !== lastSpotlight) console.log('[deck] spotlight', (lastSpotlight = spotId), spotlight.detail)
-  return { armed: latest?.armed ?? false, clock: clock(), rootDeck, ...own, spotlight, todoTop, runAge: own ? (now() - own.at) / 1000 : 0 }
+  return {
+    armed: latest?.armed ?? false,
+    clock: clock(),
+    rootDeck,
+    ...own,
+    spotlight,
+    todoTop,
+    runAge: own ? (now() - own.at) / 1000 : 0,
+  }
 }
 
 let lastSpotlight: string | undefined
@@ -153,11 +172,18 @@ async function sinceYouLooked(cursor: number): Promise<void> {
   if (!looked || looked.cursor >= cursor) return
   const { events, reset } = await client.events(looked.cursor).catch(() => ({ events: [], reset: false, cursor }))
   if (reset) return
-  const notable = events.filter(e => (e.type === 'run' && e.status === 'ok') || e.type === 'error'
-    || (e.type === 'approval' && ['refused', 'timeout', 'cancelled'].includes(String(e.status))))
+  const notable = events.filter(
+    e =>
+      (e.type === 'run' && e.status === 'ok') ||
+      e.type === 'error' ||
+      (e.type === 'approval' && ['refused', 'timeout', 'cancelled'].includes(String(e.status))),
+  )
   if (!notable.length || stack.length > 1) return
   const page: Page = { kind: 'since', scope: 'all', label: 'SINCE YOU LOOKED', cursor: 0, top: 0 }
-  cache.set(pageKey(page), { since: { events: notable, away_s: Math.max(0, (Date.now() - looked.at) / 1000) }, at: now() })
+  cache.set(pageKey(page), {
+    since: { events: notable, away_s: Math.max(0, (Date.now() - looked.at) / 1000) },
+    at: now(),
+  })
   console.log('[deck] since you looked', notable.length, 'events')
   stack = [...stack, page]
 }
@@ -175,42 +201,101 @@ function saveLooked(cursor: number): void {
 function promptPaint(p: Prompt): Paint {
   const secs = Math.max(0, Math.ceil((p.deadline - now()) / 1000))
   const more = p.waiting > 1 ? `  (+${p.waiting - 1})` : ''
-  const agent = ({ 'claude-code': 'Claude', codex: 'Codex' } as Record<string, string>)[p.req.session.agent] ?? p.req.session.agent
+  const agent =
+    ({ 'claude-code': 'Claude', codex: 'Codex' } as Record<string, string>)[p.req.session.agent] ?? p.req.session.agent
   return {
-    template: 'prompt', key: `prompt:${p.req.id}`, menu: [], // long-press is disabled on a prompt
+    template: 'prompt',
+    key: `prompt:${p.req.id}`,
+    menu: [], // long-press is disabled on a prompt
     slots: {
       head: { text: fit(`${p.req.session.name} · ${agent} · ${p.req.tool}${more}`, 460), color: 3 },
       clock: { text: p.sending ? '…' : `${secs}s`, color: 4 },
-      source: { text: fit(`from ${p.req.session.name}${stack.length > 1 ? ` · back to ${stack.map(s => s.label ?? s.kind).slice(-2).join(' › ')}` : ''}`, 568), color: 2 },
+      source: {
+        text: fit(
+          `from ${p.req.session.name}${
+            stack.length > 1
+              ? ` · back to ${stack
+                  .map(s => s.label ?? s.kind)
+                  .slice(-2)
+                  .join(' › ')}`
+              : ''
+          }`,
+          568,
+        ),
+        color: 2,
+      },
       // HARDWARE: how the G2 firmware wraps this. evenhub-simulator wraps by word, matching pretext's
       // measureTextWrap. The hook still caps the summary at 60 characters; retune on a G2.
       body: { text: p.detail ? p.req.detail : p.req.summary, color: 4 },
       risk: { text: p.req.risk === 'high' ? 'HIGH RISK' : p.req.risk, color: p.req.risk === 'high' ? 4 : 2 },
-      hint: { text: p.sending ? 'sending…' : `tap: approve  ·  double-tap: deny  ·  swipe ${p.detail ? 'up: summary' : 'down: full'}`, color: 2 },
+      hint: {
+        text: p.sending
+          ? 'sending…'
+          : `tap: approve  ·  double-tap: deny  ·  swipe ${p.detail ? 'up: summary' : 'down: full'}`,
+        color: 2,
+      },
     },
   }
 }
 
 function resultPaint(text: string): Paint {
-  return { template: 'prompt', key: `result:${text}`, menu: [],
-    slots: { head: { text: 'APPROVAL', color: 3 }, clock: { text: '', color: 4 }, source: { text: '', color: 2 }, body: { text, color: 4 }, risk: { text: '', color: 2 }, hint: { text: '', color: 2 } } }
+  return {
+    template: 'prompt',
+    key: `result:${text}`,
+    menu: [],
+    slots: {
+      head: { text: 'APPROVAL', color: 3 },
+      clock: { text: '', color: 4 },
+      source: { text: '', color: 2 },
+      body: { text, color: 4 },
+      risk: { text: '', color: 2 },
+      hint: { text: '', color: 2 },
+    },
+  }
 }
 
 // The closing beat of a focus block: four seconds of what it got done, then the Deck.
 function summaryPaint(s: FocusSummary): Paint {
-  const pair = (a: string, b: string) => columns([{ text: a, x: 0 }, { text: b, x: 100 }], 564)
-  return { template: 'detail', key: `summary:${s.reason}`, menu: [],
-    slots: { bar: { text: bar(`FOCUS · ${s.projects.join('+')}`, clock(), 564), color: 3 },
-      headline: { text: `FOCUS DONE · ${s.minutes} min\n${s.reason === 'timer' ? 'the timer ran out' : s.reason === 'disarmed' ? 'the gate was disarmed' : 'ended from the Deck'}`, color: 4 },
-      body: { text: [pair('Approved', String(s.approved)), pair('Denied', String(s.denied)), pair('Runs', `${s.runs} finished`), pair('To-dos', `${s.todos} done`)].join('\n'), color: 3 },
-      hint: { text: 'back to the Deck in a moment', color: 2 } } }
+  const pair = (a: string, b: string) =>
+    columns(
+      [
+        { text: a, x: 0 },
+        { text: b, x: 100 },
+      ],
+      564,
+    )
+  return {
+    template: 'detail',
+    key: `summary:${s.reason}`,
+    menu: [],
+    slots: {
+      bar: { text: bar(`FOCUS · ${s.projects.join('+')}`, clock(), 564), color: 3 },
+      headline: {
+        text: `FOCUS DONE · ${s.minutes} min\n${s.reason === 'timer' ? 'the timer ran out' : s.reason === 'disarmed' ? 'the gate was disarmed' : 'ended from the Deck'}`,
+        color: 4,
+      },
+      body: {
+        text: [
+          pair('Approved', String(s.approved)),
+          pair('Denied', String(s.denied)),
+          pair('Runs', `${s.runs} finished`),
+          pair('To-dos', `${s.todos} done`),
+        ].join('\n'),
+        color: 3,
+      },
+      hint: { text: 'back to the Deck in a moment', color: 2 },
+    },
+  }
 }
 
 function showSummary(s: FocusSummary): void {
   if (summary && now() < summary.until) return
   summary = { s, until: now() + SUMMARY_MS }
   focusSince = null
-  console.log('[deck] focus summary', JSON.stringify({ minutes: s.minutes, approved: s.approved, denied: s.denied, runs: s.runs, todos: s.todos }))
+  console.log(
+    '[deck] focus summary',
+    JSON.stringify({ minutes: s.minutes, approved: s.approved, denied: s.denied, runs: s.runs, todos: s.todos }),
+  )
   render()
   window.setTimeout(() => {
     summary = null
@@ -219,17 +304,35 @@ function showSummary(s: FocusSummary): void {
 }
 
 function messagePaint(kind: 'unpaired' | 'offline'): Paint {
-  const body = kind === 'unpaired' ? 'Run gatectl.py pair on the PC\nand open the link on your phone.' : 'Retrying every 2 s.'
-  return { template: 'detail', key: `message:${kind}`, menu: [],
-    slots: { bar: { text: bar('COMMAND DECK', clock(), 568), color: 3 }, headline: { text: kind === 'unpaired' ? 'NOT PAIRED' : 'RELAY OFFLINE', color: 4 },
-      body: { text: body, color: 3 }, hint: { text: kind === 'unpaired' ? '2× exit' : 'tap retry · 2× exit', color: 2 } } }
+  const body =
+    kind === 'unpaired' ? 'Run gatectl.py pair on the PC\nand open the link on your phone.' : 'Retrying every 2 s.'
+  return {
+    template: 'detail',
+    key: `message:${kind}`,
+    menu: [],
+    slots: {
+      bar: { text: bar('COMMAND DECK', clock(), 568), color: 3 },
+      headline: { text: kind === 'unpaired' ? 'NOT PAIRED' : 'RELAY OFFLINE', color: 4 },
+      body: { text: body, color: 3 },
+      hint: { text: kind === 'unpaired' ? '2× exit' : 'tap retry · 2× exit', color: 2 },
+    },
+  }
 }
 
 function pagePaint(s: Screen, page: Page): Paint {
   const barSlot = { text: barText(stack, dataFor(page)), color: 3 }
   if (s.template === 'detail') {
-    return { template: 'detail', key: s.key, menu: s.menu, slots: {
-      bar: barSlot, headline: { text: s.headline, color: 4 }, body: { text: s.body, color: 3 }, hint: { text: s.hint, color: 2 } } }
+    return {
+      template: 'detail',
+      key: s.key,
+      menu: s.menu,
+      slots: {
+        bar: barSlot,
+        headline: { text: s.headline, color: 4 },
+        body: { text: s.body, color: 3 },
+        hint: { text: s.hint, color: 2 },
+      },
+    }
   }
   const kept = page.cursorKey ? s.rows.findIndex(r => r.key === page.cursorKey) : -1
   page.cursor = kept >= 0 ? kept : Math.max(0, Math.min(page.cursor, s.rows.length - 1))
@@ -241,11 +344,13 @@ function pagePaint(s: Screen, page: Page): Paint {
   for (let i = 0; i < VISIBLE_ROWS; i++) {
     const index = page.top + i
     const row = s.rows[index]
-    slots[`r${i}`] = row ? { text: rowText(row, index === page.cursor), color: index === page.cursor ? 4 : 2 }
+    slots[`r${i}`] = row
+      ? { text: rowText(row, index === page.cursor), color: index === page.cursor ? 4 : 2 }
       : { text: i === 0 && !s.rows.length ? `  ${s.empty}` : '', color: 2 }
   }
   // More rows below or above than fit: say so on the note line when it is free.
-  if (!s.note && s.rows.length > VISIBLE_ROWS) slots.note = { text: `  ${page.cursor + 1} of ${s.rows.length}`, color: 1 }
+  if (!s.note && s.rows.length > VISIBLE_ROWS)
+    slots.note = { text: `  ${page.cursor + 1} of ${s.rows.length}`, color: 1 }
   return { template: 'list', key: s.key, menu: s.menu, slots }
 }
 
@@ -271,9 +376,14 @@ function render(): void {
   glasses.show(paint)
   const s = paint.slots
   mirror({
-    head: (s.bar ?? s.head)?.text ?? '', clock: s.clock?.text ?? '',
-    body: paint.template === 'list' ? ['r0', 'r1', 'r2', 'r3', 'r4'].map(r => s[r]?.text ?? '').join('\n') : `${(s.headline ?? s.body)?.text ?? ''}\n\n${paint.template === 'detail' ? s.body.text : ''}`,
-    risk: (s.note ?? s.risk)?.text ?? '', hint: s.hint?.text ?? '',
+    head: (s.bar ?? s.head)?.text ?? '',
+    clock: s.clock?.text ?? '',
+    body:
+      paint.template === 'list'
+        ? ['r0', 'r1', 'r2', 'r3', 'r4'].map(r => s[r]?.text ?? '').join('\n')
+        : `${(s.headline ?? s.body)?.text ?? ''}\n\n${paint.template === 'detail' ? s.body.text : ''}`,
+    risk: (s.note ?? s.risk)?.text ?? '',
+    hint: s.hint?.text ?? '',
   })
 }
 
@@ -291,23 +401,38 @@ async function fetchPage(page: Page): Promise<void> {
   const id = page.id ?? ''
   let got: Partial<Data>
   switch (page.kind) {
-    case 'deck': got = { deck: await c.deck(page.scope) }; break
+    case 'deck':
+      got = { deck: await c.deck(page.scope) }
+      break
     case 'project': {
       const [deck, project] = await Promise.all([c.deck(page.scope), c.project(page.scope)])
       got = { deck, project }
       break
     }
-    case 'needs': got = { needs: await c.needs(page.scope) }; break
-    case 'sessions': got = { sessions: await c.sessions(page.scope) }; break
+    case 'needs':
+      got = { needs: await c.needs(page.scope) }
+      break
+    case 'sessions':
+      got = { sessions: await c.sessions(page.scope) }
+      break
     case 'running': {
       got = { runs: await c.runs(page.scope) }
       console.debug('[deck] running', got.runs!.items.map(r => r.id).join(',') || '-')
       break
     }
-    case 'projects': case 'focus': got = { projects: await c.projects() }; break
-    case 'todos': got = { todos: await c.todos(page.scope) }; break
-    case 'session': got = { session: await c.session(id) }; break
-    case 'run': got = { run: await c.run(id) }; break
+    case 'projects':
+    case 'focus':
+      got = { projects: await c.projects() }
+      break
+    case 'todos':
+      got = { todos: await c.todos(page.scope) }
+      break
+    case 'session':
+      got = { session: await c.session(id) }
+      break
+    case 'run':
+      got = { run: await c.run(id) }
+      break
     case 'todo': {
       // Keep the last copy when the line changes on disk: the tap then still asks the relay, which
       // answers 409, and the screen says so. The glasses never guess that a file changed.
@@ -316,15 +441,21 @@ async function fetchPage(page: Page): Promise<void> {
       got = { todo: fresh ?? prev?.todo, todoOutcome: prev?.todoOutcome }
       break
     }
-    case 'card': got = { need: (await c.needs('all')).items.find(n => n.kind === 'card' && n.id === id) }; break
-    case 'commits': got = { project: await c.project(page.scope) }; break
+    case 'card':
+      got = { need: (await c.needs('all')).items.find(n => n.kind === 'card' && n.id === id) }
+      break
+    case 'commits':
+      got = { project: await c.project(page.scope) }
+      break
     case 'error': {
-      got = { error: (rootDeck ?? await c.deck('all')).errors.find(e => (e.error ?? e.id) === id) }
+      got = { error: (rootDeck ?? (await c.deck('all'))).errors.find(e => (e.error ?? e.id) === id) }
       markSeen(id) // opened: the spotlight lets go of it
       break
     }
-    case 'since': return // filled once, at open
-    default: got = {}
+    case 'since':
+      return // filled once, at open
+    default:
+      got = {}
   }
   cache.set(key, { ...got, at: now() })
 }
@@ -351,8 +482,13 @@ async function poll(): Promise<void> {
       if (last_summary) showSummary(last_summary)
     }
     focusSince = rootDeck.focus?.started_at ?? null
-    const counts = JSON.stringify({ needs: rootDeck.needs_you, sessions: rootDeck.sessions, running: rootDeck.running,
-      projects: rootDeck.projects, todos: rootDeck.todos_open })
+    const counts = JSON.stringify({
+      needs: rootDeck.needs_you,
+      sessions: rootDeck.sessions,
+      running: rootDeck.running,
+      projects: rootDeck.projects,
+      todos: rootDeck.todos_open,
+    })
     if (counts !== lastCounts) console.debug('[deck] counts', (lastCounts = counts)) // the sim runs compare these with the desktop page
     await sinceYouLooked(rootDeck.cursor)
     saveLooked(rootDeck.cursor)
@@ -385,11 +521,22 @@ function applyGate(p: Poll): void {
   if (req && prompt && prompt.req.id === req.id) {
     const deadline = now() + req.expires_in * 1000
     // Follow the relay's clock, but don't let a ±1 s poll jitter shake the countdown.
-    prompt = { ...prompt, waiting: p.waiting, deadline: Math.abs(deadline - prompt.deadline) > 1500 ? deadline : prompt.deadline }
+    prompt = {
+      ...prompt,
+      waiting: p.waiting,
+      deadline: Math.abs(deadline - prompt.deadline) > 1500 ? deadline : prompt.deadline,
+    }
     return
   }
   if (req) {
-    prompt = { req, deadline: now() + req.expires_in * 1000, shownAt: now(), detail: false, waiting: p.waiting, sending: false }
+    prompt = {
+      req,
+      deadline: now() + req.expires_in * 1000,
+      shownAt: now(),
+      detail: false,
+      waiting: p.waiting,
+      sending: false,
+    }
     console.log('[deck] prompt', req.id, 'over', pageKey(top()), 'cursor', top().cursor)
     return
   }
@@ -414,7 +561,9 @@ async function send(decision: 'approve' | 'deny'): Promise<void> {
   render()
   try {
     const outcome = await client.decide(req.id, decision, req.nonce)
-    showResult(outcome === 'gone' ? 'TOO LATE\nalready expired or answered' : decision === 'approve' ? 'APPROVED' : 'DENIED')
+    showResult(
+      outcome === 'gone' ? 'TOO LATE\nalready expired or answered' : decision === 'approve' ? 'APPROVED' : 'DENIED',
+    )
   } catch (err) {
     showResult(err instanceof AuthError ? 'NOT PAIRED' : 'NOT SENT\ncheck the relay')
   }
@@ -461,9 +610,12 @@ function pop(): void {
 async function act(action: Action | undefined): Promise<void> {
   if (!action || !client) return
   switch (action.do) {
-    case 'open': return push(action.page)
-    case 'prompt': return void poll() // a live approval takes the screen by itself
-    case 'arm-toggle': return void setArmed(!latest?.armed, 'glasses')
+    case 'open':
+      return push(action.page)
+    case 'prompt':
+      return void poll() // a live approval takes the screen by itself
+    case 'arm-toggle':
+      return void setArmed(!latest?.armed, 'glasses')
     case 'transitions':
       glasses.fadeIn = !glasses.fadeIn
       return void store(KEY_TRANSITIONS, glasses.fadeIn ? 'on' : 'off')
@@ -473,14 +625,19 @@ async function act(action: Action | undefined): Promise<void> {
       const page = top()
       const entry = cache.get(pageKey(page))
       if (page.kind === 'todo' && entry?.todo) {
-        cache.set(pageKey(page), { ...entry, todo: { ...entry.todo, done: outcome === 'done' || entry.todo.done }, todoOutcome: outcome })
+        cache.set(pageKey(page), {
+          ...entry,
+          todo: { ...entry.todo, done: outcome === 'done' || entry.todo.done },
+          todoOutcome: outcome,
+        })
         render()
         if (outcome === 'done') window.setTimeout(() => top() === page && pop(), 1200) // DONE, then back to the list
         return
       }
       return void poll()
     }
-    case 'focus-start': return push({ kind: 'focus', scope: 'all', label: 'FOCUS' })
+    case 'focus-start':
+      return push({ kind: 'focus', scope: 'all', label: 'FOCUS' })
     case 'focus-end': {
       const ended = await client.endFocus().catch(() => null)
       if (ended) showSummary(ended)
@@ -495,8 +652,11 @@ async function act(action: Action | undefined): Promise<void> {
     case 'pick': {
       const page = top()
       const picked = page.picked ?? [...(rootDeck?.focus?.projects ?? [])]
-      page.picked = picked.includes(action.project) ? picked.filter(p => p !== action.project)
-        : picked.length < 2 ? [...picked, action.project] : picked
+      page.picked = picked.includes(action.project)
+        ? picked.filter(p => p !== action.project)
+        : picked.length < 2
+          ? [...picked, action.project]
+          : picked
       return render()
     }
     case 'focus-go': {
@@ -511,7 +671,8 @@ async function act(action: Action | undefined): Promise<void> {
       console.log('[deck] muted', action.session)
       if (top().kind === 'session' && top().id === action.session) return pop()
       return void poll()
-    case 'back': return pop()
+    case 'back':
+      return pop()
     case 'todo-top':
       todoTop = [action.id, ...todoTop.filter(t => t !== action.id)].slice(0, 50)
       void store(KEY_TODO_TOP, JSON.stringify(todoTop))
@@ -549,103 +710,116 @@ window.setInterval(() => render(), 1000) // the clock, the prompt countdown and 
 
 // ---- input -----------------------------------------------------------------------
 
-const gestures = createGestures(() => view, {
-  tap(id) {
-    if (id !== view.id) return
-    if (message === 'offline') return void poll()
-    if (message || result) return
-    if (prompt) return void send('approve')
-    if (summary && now() < summary.until) {
-      summary = null
-      return render()
-    }
-    if (!screen) return
-    if (screen.template === 'list') return void act(screen.rows[top().cursor]?.open)
-    return void act(screen.primary)
-  },
-  double() {
-    if (prompt) return void send('deny')
-    if (result) return
-    if (message) return exit()
-    if (summary && now() < summary.until) {
-      summary = null
-      return render()
-    }
-    pop()
-  },
-  swipe(down) {
-    if (prompt && !prompt.sending && !result) {
-      if (prompt.detail !== down) {
-        prompt = { ...prompt, detail: down }
-        render()
+const gestures = createGestures(
+  () => view,
+  {
+    tap(id) {
+      if (id !== view.id) return
+      if (message === 'offline') return void poll()
+      if (message || result) return
+      if (prompt) return void send('approve')
+      if (summary && now() < summary.until) {
+        summary = null
+        return render()
       }
-      return
-    }
-    if (!message && !result) move(down)
+      if (!screen) return
+      if (screen.template === 'list') return void act(screen.rows[top().cursor]?.open)
+      return void act(screen.primary)
+    },
+    double() {
+      if (prompt) return void send('deny')
+      if (result) return
+      if (message) return exit()
+      if (summary && now() < summary.until) {
+        summary = null
+        return render()
+      }
+      pop()
+    },
+    swipe(down) {
+      if (prompt && !prompt.sending && !result) {
+        if (prompt.detail !== down) {
+          prompt = { ...prompt, detail: down }
+          render()
+        }
+        return
+      }
+      if (!message && !result) move(down)
+    },
+    menu(itemID, id) {
+      if (id !== view.id || prompt || message) return
+      console.log('[deck] menu', itemID, 'on', pageKey(top()), 'row', top().cursor)
+      void act(menuAction(itemID))
+    },
+    foreground(entered) {
+      foreground = entered
+      phoneDeck?.setBlank(!entered)
+      // Back in front: anything shown before is stale. Ask the relay again now.
+      // HARDWARE: FOREGROUND_ENTER after a real background is unverified (see gestures.ts).
+      if (entered) void poll()
+      else window.clearTimeout(pollTimer)
+    },
+    systemExit(abnormal) {
+      disarmOnExit(abnormal ? 'plugin exited abnormally' : 'plugin exit')
+      unsubscribe()
+    },
   },
-  menu(itemID, id) {
-    if (id !== view.id || prompt || message) return
-    console.log('[deck] menu', itemID, 'on', pageKey(top()), 'row', top().cursor)
-    void act(menuAction(itemID))
+  {
+    now,
+    setTimeout: (fn, ms) => window.setTimeout(fn, ms),
+    clearTimeout: handle => window.clearTimeout(handle as number),
   },
-  foreground(entered) {
-    foreground = entered
-    phoneDeck?.setBlank(!entered)
-    // Back in front: anything shown before is stale. Ask the relay again now.
-    // HARDWARE: FOREGROUND_ENTER after a real background is unverified (see gestures.ts).
-    if (entered) void poll()
-    else window.clearTimeout(pollTimer)
-  },
-  systemExit(abnormal) {
-    disarmOnExit(abnormal ? 'plugin exited abnormally' : 'plugin exit')
-    unsubscribe()
-  },
-}, {
-  now,
-  setTimeout: (fn, ms) => window.setTimeout(fn, ms),
-  clearTimeout: handle => window.clearTimeout(handle as number),
-})
+)
 
 const unsubscribe = bridge.onEvenHubEvent(event => gestures.handle(event))
 
 // ---- phone page ----------------------------------------------------------------
 
-mirror = mountPhone(document.querySelector<HTMLDivElement>('#app')!, {
-  async pair(relay, token) {
-    if (!/^https?:\/\//.test(relay) || !token.startsWith('agt_')) return 'Need a relay URL (http/https) and an agt_ token.'
-    const candidate = new DeckClient(relay, token)
-    try {
-      const health = await candidate.health()
-      if (health.auth !== 'device') return 'Relay reached, but it does not know this token.'
-      await store(KEY_RELAY, relay)
-      await store(KEY_TOKEN, token)
-      client = candidate
-      message = null
+mirror = mountPhone(
+  document.querySelector<HTMLDivElement>('#app')!,
+  {
+    async pair(relay, token) {
+      if (!/^https?:\/\//.test(relay) || !token.startsWith('agt_'))
+        return 'Need a relay URL (http/https) and an agt_ token.'
+      const candidate = new DeckClient(relay, token)
+      try {
+        const health = await candidate.health()
+        if (health.auth !== 'device') return 'Relay reached, but it does not know this token.'
+        await store(KEY_RELAY, relay)
+        await store(KEY_TOKEN, token)
+        client = candidate
+        message = null
+        void poll()
+        return `Paired. Relay ${health.version}, gate ${health.armed ? 'armed' : 'off'}.`
+      } catch (err) {
+        return `Could not reach the relay: ${(err as Error).message}`
+      }
+    },
+    async unpair() {
+      await store(KEY_TOKEN, '')
+      client = null
       void poll()
-      return `Paired. Relay ${health.version}, gate ${health.armed ? 'armed' : 'off'}.`
-    } catch (err) {
-      return `Could not reach the relay: ${(err as Error).message}`
-    }
+    },
+    async disarm() {
+      await setArmed(false, 'phone')
+    },
   },
-  async unpair() {
-    await store(KEY_TOKEN, '')
-    client = null
-    void poll()
-  },
-  async disarm() {
-    await setArmed(false, 'phone')
-  },
-}, await load(KEY_RELAY))
+  await load(KEY_RELAY),
+)
 
 if (PHONE_DECK) {
   const { mountDeck } = await import('../../web/deck-ui.js')
   await import('../../web/deck-ui.css')
   const slot = document.querySelector<HTMLElement>('#deckPhone')!
   slot.hidden = false
-  phoneDeck = mountDeck(slot, {
-    get: path => (client ? client.get(path) : Promise.reject(new Error('not paired'))),
-    events: (since, wait) => (client ? client.events(since, wait) : Promise.reject(new Error('not paired'))),
-  }, { hidePaths: true, title: 'Command Deck' })
+  phoneDeck = mountDeck(
+    slot,
+    {
+      get: path => (client ? client.get(path) : Promise.reject(new Error('not paired'))),
+      events: (since, wait) => (client ? client.events(since, wait) : Promise.reject(new Error('not paired'))),
+    },
+    { hidePaths: true, title: 'Command Deck' },
+  )
   // Blank whenever the page is out of sight, so a glance at an unlocked phone shows nothing.
   document.addEventListener('visibilitychange', () => phoneDeck?.setBlank(document.hidden))
 }

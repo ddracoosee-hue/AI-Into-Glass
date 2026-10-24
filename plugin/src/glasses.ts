@@ -1,8 +1,13 @@
 // The glasses side: three layouts with fixed container ids, diffed upgrades, rebuilds only when the
 // page (and so its menu) changes. All bridge writes are serialized.
 import {
-  CreateStartUpPageContainer, MenuContainerProperty, MenuItemProperty, RebuildPageContainer, TextContainerProperty,
-  TextContainerUpgrade, type EvenAppBridge,
+  CreateStartUpPageContainer,
+  MenuContainerProperty,
+  MenuItemProperty,
+  RebuildPageContainer,
+  TextContainerProperty,
+  TextContainerUpgrade,
+  type EvenAppBridge,
 } from '@evenrealities/even_hub_sdk'
 import type { Menu, Template } from './screens.ts'
 
@@ -72,11 +77,15 @@ export class Glasses {
     if (!prev || prev.template !== next.template || prev.key !== next.key) {
       // What the screen will show once the queue drains, so later diffs compare against the truth.
       const fade = this.fadeIn && prev !== null
-      this.painted = Object.fromEntries(Object.keys(LAYOUTS[next.template]).map(name => {
-        const slot = next.slots[name] ?? { text: '', color: 2 }
-        return [name, { text: slot.text, color: fade ? Math.min(slot.color, 2) : slot.color }]
-      }))
-      this.queue = this.queue.then(() => this.rebuild(prev, next, fade)).catch(err => console.error('[deck] rebuild failed', err))
+      this.painted = Object.fromEntries(
+        Object.keys(LAYOUTS[next.template]).map(name => {
+          const slot = next.slots[name] ?? { text: '', color: 2 }
+          return [name, { text: slot.text, color: fade ? Math.min(slot.color, 2) : slot.color }]
+        }),
+      )
+      this.queue = this.queue
+        .then(() => this.rebuild(prev, next, fade))
+        .catch(err => console.error('[deck] rebuild failed', err))
       return
     }
     const changed: string[] = []
@@ -88,7 +97,16 @@ export class Glasses {
       const id = LAYOUTS[next.template][name].id
       this.stats.upgrades++
       this.queue = this.queue
-        .then(() => this.bridge.textContainerUpgrade(new TextContainerUpgrade({ containerID: id, containerName: name, content: slot.text || ' ', textColor: slot.color })))
+        .then(() =>
+          this.bridge.textContainerUpgrade(
+            new TextContainerUpgrade({
+              containerID: id,
+              containerName: name,
+              content: slot.text || ' ',
+              textColor: slot.color,
+            }),
+          ),
+        )
         .catch(err => console.error('[deck] upgrade failed', name, err))
     }
     if (changed.length) console.debug('[deck] upgrade', next.key, changed.join(','))
@@ -99,25 +117,45 @@ export class Glasses {
     const crumbSlot = next.slots.bar ?? next.slots.head
     if (prev && crumbSlot) {
       const first = Object.keys(LAYOUTS[prev.template])[0]
-      await this.bridge.textContainerUpgrade(new TextContainerUpgrade({ containerID: 1, containerName: first, content: crumbSlot.text || ' ', textColor: 3 }))
+      await this.bridge.textContainerUpgrade(
+        new TextContainerUpgrade({
+          containerID: 1,
+          containerName: first,
+          content: crumbSlot.text || ' ',
+          textColor: 3,
+        }),
+      )
     }
     const layout = LAYOUTS[next.template]
     const textObject = Object.entries(layout).map(([name, l]) => {
       const slot = next.slots[name] ?? { text: '', color: 2 }
       return new TextContainerProperty({
-        xPosition: l.x, yPosition: l.y, width: l.w, height: l.h,
-        borderWidth: l.border ? 1 : 0, borderColor: l.border ? 6 : 0, borderRadius: l.border ? 6 : 0,
-        paddingLength: 2, containerID: l.id, containerName: name, content: slot.text || ' ',
-        textColor: fade ? Math.min(slot.color, 2) : slot.color, isEventCapture: l.capture ? 1 : 0,
+        xPosition: l.x,
+        yPosition: l.y,
+        width: l.w,
+        height: l.h,
+        borderWidth: l.border ? 1 : 0,
+        borderColor: l.border ? 6 : 0,
+        borderRadius: l.border ? 6 : 0,
+        paddingLength: 2,
+        containerID: l.id,
+        containerName: name,
+        content: slot.text || ' ',
+        textColor: fade ? Math.min(slot.color, 2) : slot.color,
+        isEventCapture: l.capture ? 1 : 0,
       })
     })
     const page = {
-      containerTotalNum: textObject.length, textObject,
-      menuObject: new MenuContainerProperty({ menuItems: next.menu.map(m => new MenuItemProperty({ itemName: m.name, itemID: m.id })) }),
+      containerTotalNum: textObject.length,
+      textObject,
+      menuObject: new MenuContainerProperty({
+        menuItems: next.menu.map(m => new MenuItemProperty({ itemName: m.name, itemID: m.id })),
+      }),
     }
-    const ok = prev === null
-      ? (await this.bridge.createStartUpPageContainer(new CreateStartUpPageContainer(page))) === 0
-      : await this.bridge.rebuildPageContainer(new RebuildPageContainer(page))
+    const ok =
+      prev === null
+        ? (await this.bridge.createStartUpPageContainer(new CreateStartUpPageContainer(page))) === 0
+        : await this.bridge.rebuildPageContainer(new RebuildPageContainer(page))
     if (!ok) console.error('[deck] page rejected', next.template, next.key)
     this.stats.rebuilds++
     console.log('[deck] rebuild', next.key)
